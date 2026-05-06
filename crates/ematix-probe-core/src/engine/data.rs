@@ -51,7 +51,10 @@ pub enum Assertion {
     /// `NotNull` to forbid them. Empty `allowed` is rejected at
     /// adapter time (every non-NULL row would violate, which is
     /// almost certainly user error).
-    Enum { column: String, allowed: Vec<String> },
+    Enum {
+        column: String,
+        allowed: Vec<String>,
+    },
     /// Table-level: `count(*)` must lie within `[low, high]`,
     /// where either bound may be `None` to denote "unbounded on
     /// that side". `low: Some(n)` is "at least n"; `high: Some(n)`

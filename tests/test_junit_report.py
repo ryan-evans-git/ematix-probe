@@ -17,7 +17,6 @@ import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 from pathlib import Path
 
-import pytest
 from ematix_probe.report import AssertionResult, RunReport
 
 

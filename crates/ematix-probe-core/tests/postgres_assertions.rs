@@ -299,7 +299,10 @@ async fn regex_fails_when_any_value_violates() {
         .message
         .as_ref()
         .expect("message present on fail");
-    assert!(msg.contains("email"), "message should reference column, got: {msg:?}");
+    assert!(
+        msg.contains("email"),
+        "message should reference column, got: {msg:?}"
+    );
     assert!(
         msg.contains('1'),
         "message should report 1 non-matching row, got: {msg:?}"
@@ -400,8 +403,14 @@ async fn row_count_at_least_fails_on_empty_table() {
         .message
         .as_ref()
         .expect("message present on fail");
-    assert!(msg.contains('0'), "message should mention actual count 0, got: {msg:?}");
-    assert!(msg.contains('1'), "message should mention low bound 1, got: {msg:?}");
+    assert!(
+        msg.contains('0'),
+        "message should mention actual count 0, got: {msg:?}"
+    );
+    assert!(
+        msg.contains('1'),
+        "message should mention low bound 1, got: {msg:?}"
+    );
 }
 
 #[tokio::test]
@@ -433,8 +442,14 @@ async fn row_count_at_most_fails_when_oversized() {
         .message
         .as_ref()
         .expect("message present on fail");
-    assert!(msg.contains("1500"), "message should mention actual count 1500, got: {msg:?}");
-    assert!(msg.contains("1000"), "message should mention high bound 1000, got: {msg:?}");
+    assert!(
+        msg.contains("1500"),
+        "message should mention actual count 1500, got: {msg:?}"
+    );
+    assert!(
+        msg.contains("1000"),
+        "message should mention high bound 1000, got: {msg:?}"
+    );
 }
 
 #[tokio::test]

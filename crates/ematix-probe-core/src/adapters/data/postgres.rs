@@ -88,8 +88,12 @@ impl DataAdapter for PostgresAdapter {
                 Assertion::RowCount { low, high } => {
                     self.run_row_count(plan, idx, *low, *high).await?
                 }
-                Assertion::Freshness { column, within_seconds } => {
-                    self.run_freshness(plan, idx, column, *within_seconds).await?
+                Assertion::Freshness {
+                    column,
+                    within_seconds,
+                } => {
+                    self.run_freshness(plan, idx, column, *within_seconds)
+                        .await?
                 }
             };
             results.push(result);

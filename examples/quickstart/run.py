@@ -19,7 +19,6 @@ consume.
 
 from __future__ import annotations
 
-import os
 import sys
 from pathlib import Path
 
@@ -96,8 +95,11 @@ def main() -> int:
                 line += f"  -- {a.message}"
             print(line)
         print()
-        print(f"JUnit XML: {junit_path.relative_to(Path.cwd()) if junit_path.is_relative_to(Path.cwd()) else junit_path}")
-        print(f"JSON:      {json_path.relative_to(Path.cwd()) if json_path.is_relative_to(Path.cwd()) else json_path}")
+        cwd = Path.cwd()
+        junit_disp = junit_path.relative_to(cwd) if junit_path.is_relative_to(cwd) else junit_path
+        json_disp = json_path.relative_to(cwd) if json_path.is_relative_to(cwd) else json_path
+        print(f"JUnit XML: {junit_disp}")
+        print(f"JSON:      {json_disp}")
 
     return 0
 
