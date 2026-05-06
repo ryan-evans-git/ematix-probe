@@ -79,6 +79,9 @@ impl DataAdapter for PostgresAdapter {
                 Assertion::Between { column, low, high } => {
                     self.run_between(plan, idx, column, *low, *high).await?
                 }
+                Assertion::Regex { column, pattern } => {
+                    self.run_regex(plan, idx, column, pattern).await?
+                }
             };
             results.push(result);
         }
@@ -226,6 +229,52 @@ impl PostgresAdapter {
                 verdict: Verdict::Fail,
                 message: Some(format!(
                     "column {column:?} has {oor_count} row(s) outside [{low}, {high}]"
+                )),
+            })
+        }
+    }
+}
+
+impl PostgresAdapter {
+    /// Pushdown SQL for `Regex` (Postgres POSIX `!~`):
+    ///   `SELECT count(*) FROM <t> WHERE <col> !~ $1`
+    /// Pass at 0; Fail with non-matching row count otherwise.
+    /// NULL values are not counted: `NULL !~ pat` is NULL, which
+    /// `WHERE` treats as false. Pair with `NotNull` to forbid NULLs.
+    async fn run_regex(
+        &self,
+        plan: &ProbePlan,
+        idx: usize,
+        column: &str,
+        pattern: &str,
+    ) -> Result<AssertionResult, AdapterError> {
+        let table = qualified_table(plan.schema.as_deref(), &plan.table);
+        let col = quote_ident(column);
+        let sql = format!("SELECT count(*) FROM {table} WHERE {col} !~ $1");
+
+        let client = self
+            .pool
+            .get()
+            .await
+            .map_err(|e| AdapterError::Connection(format!("acquire failed: {e}")))?;
+        let row = client
+            .query_one(&sql, &[&pattern])
+            .await
+            .map_err(|e| AdapterError::Query(format!("regex query failed: {e}")))?;
+        let bad_count: i64 = row.get(0);
+
+        if bad_count == 0 {
+            Ok(AssertionResult {
+                assertion_index: idx,
+                verdict: Verdict::Pass,
+                message: None,
+            })
+        } else {
+            Ok(AssertionResult {
+                assertion_index: idx,
+                verdict: Verdict::Fail,
+                message: Some(format!(
+                    "column {column:?} has {bad_count} row(s) not matching pattern {pattern:?}"
                 )),
             })
         }
