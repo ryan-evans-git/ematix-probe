@@ -25,9 +25,11 @@ from dataclasses import dataclass
 
 from ematix_probe._core import (
     ProbePlan,
+    RunReport,
     assertion_between,
     assertion_not_null,
     assertion_unique,
+    run_postgres_probe,
 )
 
 from .source import Source
@@ -132,6 +134,19 @@ class DataProbe:
     def plan(self) -> ProbePlan:
         """The compiled Rust-side `ProbePlan`."""
         return self._plan
+
+    def run(self) -> RunReport:
+        """Execute the probe against the configured source. Sync;
+        async support lands with the pytest plugin in Sprint 9.
+        Only Postgres sources are wired in v0.1 Phase 1a."""
+        if self._source.kind == "postgres":
+            return run_postgres_probe(self._source.url, self._plan)
+        # DuckDB / Parquet adapters land in Phase 2; until then we
+        # error explicitly rather than silently no-op.
+        raise NotImplementedError(
+            f"source kind {self._source.kind!r} is not yet supported by "
+            f"DataProbe.run() in v0.1 Phase 1a"
+        )
 
     @property
     def source(self) -> Source:

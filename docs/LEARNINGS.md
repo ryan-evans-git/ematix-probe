@@ -44,6 +44,25 @@ libpython → green.
 
 Apply this pattern to every future PyO3-bound crate.
 
+## 2026-05-06 — pyo3 0.28 API churn: `allow_threads` → `detach`, `Clone` + `pyclass` needs explicit opt-in `pyo3` `rust`
+
+Two friction points crossing the Python boundary in S-2.6 / S-2.7:
+
+1. `Python::allow_threads(...)` was renamed to `Python::detach(...)`
+   in pyo3 0.28. Same semantics (release the GIL while a closure
+   runs blocking work like `runtime.block_on`), new name.
+
+2. `#[pyclass]` types that derive `Clone` no longer auto-derive
+   `FromPyObject`. Without an opt-in, you get a deprecation warning;
+   with `-D warnings` in CI, that's a build failure. Fix:
+   `#[pyclass(..., from_py_object)]` for types that need to round-
+   trip through Python args (e.g. `Vec<PyAssertion>` in
+   `ProbePlan::new`).
+
+When upgrading pyo3 in this repo: grep for `allow_threads` and for
+`#[pyclass(...)]` blocks paired with `#[derive(Clone)]` and add the
+explicit opt-ins.
+
 ## 2026-05-06 — Postgres infers parameter types from the LHS column `pyo3` `tooling` `rust`
 
 S-2.5 (`Between` assertion) with f64 bounds and an INT column hit:

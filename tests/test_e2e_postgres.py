@@ -12,11 +12,10 @@ them via `-m "not e2e"`. CI runs everything.
 
 from __future__ import annotations
 
-import pytest
 import psycopg2
-from testcontainers.postgres import PostgresContainer
-
+import pytest
 from ematix_probe import probe, source
+from testcontainers.postgres import PostgresContainer
 
 
 @pytest.fixture(scope="module")

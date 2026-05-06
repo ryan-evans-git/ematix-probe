@@ -2,9 +2,14 @@
 //!
 //! S-2.6 lands the `ProbePlan` / `Assertion` types + the assertion
 //! factory functions that the Python `@probe.data` decorator uses
-//! to assemble plans. Probe execution (`run`) lands in S-2.7.
+//! to assemble plans. S-2.7 adds end-to-end probe execution
+//! (`run_postgres_probe`) that the Python-side `DataProbe.run`
+//! routes through.
 
 use ematix_probe_core as core;
+use ematix_probe_core::adapters::data::postgres::PostgresAdapter;
+use ematix_probe_core::DataAdapter;
+use pyo3::exceptions::PyRuntimeError;
 use pyo3::prelude::*;
 
 /// Python wrapper around `core::Assertion`. Constructed via the
@@ -104,6 +109,108 @@ fn assertion_not_null(column: String) -> PyAssertion {
     }
 }
 
+/// Per-assertion outcome surfaced to Python.
+#[pyclass(name = "AssertionResult", module = "ematix_probe._core", frozen)]
+struct PyAssertionResult {
+    inner: core::AssertionResult,
+}
+
+#[pymethods]
+impl PyAssertionResult {
+    #[getter]
+    fn assertion_index(&self) -> usize {
+        self.inner.assertion_index
+    }
+
+    /// Verdict as a string ("pass" / "fail" / "error") for
+    /// ergonomic Python comparisons.
+    #[getter]
+    fn verdict(&self) -> &'static str {
+        verdict_str(self.inner.verdict)
+    }
+
+    #[getter]
+    fn message(&self) -> Option<String> {
+        self.inner.message.clone()
+    }
+
+    fn __repr__(&self) -> String {
+        format!("AssertionResult({:?})", self.inner)
+    }
+}
+
+/// Aggregate result returned by `DataProbe.run`.
+#[pyclass(name = "RunReport", module = "ematix_probe._core", frozen)]
+struct PyRunReport {
+    inner: core::RunSummary,
+}
+
+#[pymethods]
+impl PyRunReport {
+    #[getter]
+    fn verdict(&self) -> &'static str {
+        verdict_str(self.inner.verdict)
+    }
+
+    #[getter]
+    fn assertions(&self) -> Vec<PyAssertionResult> {
+        self.inner
+            .assertions
+            .iter()
+            .cloned()
+            .map(|inner| PyAssertionResult { inner })
+            .collect()
+    }
+
+    fn __len__(&self) -> usize {
+        self.inner.assertions.len()
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "RunReport(verdict={:?}, assertions={})",
+            verdict_str(self.inner.verdict),
+            self.inner.assertions.len()
+        )
+    }
+}
+
+fn verdict_str(v: core::Verdict) -> &'static str {
+    match v {
+        core::Verdict::Pass => "pass",
+        core::Verdict::Fail => "fail",
+        core::Verdict::Error => "error",
+    }
+}
+
+/// Synchronous Python entry point: connect to Postgres, run the
+/// plan, return a `RunReport`. Internally builds a current-thread
+/// tokio runtime (PostgresAdapter is async). pyo3-asyncio
+/// integration that exposes an awaitable to Python lands later
+/// (Sprint 9, pytest plugin work).
+///
+/// Releasing the GIL via `py.detach` is important: without it,
+/// the runtime's `block_on` would hold the GIL while waiting on
+/// the network, blocking other Python threads. (`detach` replaced
+/// `allow_threads` in pyo3 0.28.)
+#[pyfunction]
+fn run_postgres_probe(py: Python<'_>, url: String, plan: &PyProbePlan) -> PyResult<PyRunReport> {
+    let core_plan = plan.inner.clone();
+    let summary = py.detach(move || -> Result<core::RunSummary, core::AdapterError> {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .map_err(|e| core::AdapterError::Connection(format!("tokio runtime: {e}")))?;
+        runtime.block_on(async move {
+            let adapter = PostgresAdapter::connect(&url).await?;
+            adapter.execute(&core_plan).await
+        })
+    });
+    summary
+        .map(|inner| PyRunReport { inner })
+        .map_err(|e| PyRuntimeError::new_err(e.to_string()))
+}
+
 #[pyfunction]
 fn assertion_unique(column: String) -> PyAssertion {
     PyAssertion {
@@ -123,8 +230,11 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("__version__", core::VERSION)?;
     m.add_class::<PyAssertion>()?;
     m.add_class::<PyProbePlan>()?;
+    m.add_class::<PyAssertionResult>()?;
+    m.add_class::<PyRunReport>()?;
     m.add_function(wrap_pyfunction!(assertion_not_null, m)?)?;
     m.add_function(wrap_pyfunction!(assertion_unique, m)?)?;
     m.add_function(wrap_pyfunction!(assertion_between, m)?)?;
+    m.add_function(wrap_pyfunction!(run_postgres_probe, m)?)?;
     Ok(())
 }

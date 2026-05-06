@@ -22,3 +22,4 @@ extension-module = ["pyo3/extension-module"]
 [dependencies]
 ematix-probe-core = { workspace = true }
 pyo3 = { workspace = true }
+tokio = { workspace = true }
