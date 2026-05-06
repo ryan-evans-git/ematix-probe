@@ -1,4 +1,4 @@
-//! S-2.3..S-2.5 + S-3.1..S-3.3 — per-assertion behavior tests against
+//! S-2.3..S-2.5 + S-3.1..S-3.4 — per-assertion behavior tests against
 //! a real Postgres instance via `testcontainers`.
 
 use async_trait::async_trait;
@@ -461,4 +461,106 @@ async fn row_count_passes_when_in_range() {
     };
     let summary = adapter.execute(&plan).await.expect("execute");
     assert_eq!(summary.verdict, Verdict::Pass);
+}
+
+#[tokio::test]
+async fn freshness_passes_when_max_recent() {
+    let (_pg, url) = postgres().await;
+
+    let client = raw_client(&url).await;
+    client
+        .batch_execute(
+            "CREATE TABLE events (id SERIAL PRIMARY KEY, updated_at TIMESTAMPTZ);
+             -- newest row 5 minutes ago — well within a 24h window.
+             INSERT INTO events (updated_at) VALUES
+               (now() - interval '6 hours'),
+               (now() - interval '5 minutes'),
+               (now() - interval '2 hours');",
+        )
+        .await
+        .expect("setup");
+
+    let adapter = PostgresAdapter::connect(&url).await.expect("adapter");
+    let plan = ProbePlan {
+        schema: None,
+        table: "events".to_string(),
+        assertions: vec![Assertion::Freshness {
+            column: "updated_at".to_string(),
+            within_seconds: 24 * 3600,
+        }],
+    };
+    let summary = adapter.execute(&plan).await.expect("execute");
+    assert_eq!(summary.verdict, Verdict::Pass);
+}
+
+#[tokio::test]
+async fn freshness_fails_when_max_too_old() {
+    let (_pg, url) = postgres().await;
+
+    let client = raw_client(&url).await;
+    client
+        .batch_execute(
+            "CREATE TABLE events (id SERIAL PRIMARY KEY, updated_at TIMESTAMPTZ);
+             -- newest row 48 hours old → fails within(24h).
+             INSERT INTO events (updated_at) VALUES
+               (now() - interval '72 hours'),
+               (now() - interval '48 hours');",
+        )
+        .await
+        .expect("setup");
+
+    let adapter = PostgresAdapter::connect(&url).await.expect("adapter");
+    let plan = ProbePlan {
+        schema: None,
+        table: "events".to_string(),
+        assertions: vec![Assertion::Freshness {
+            column: "updated_at".to_string(),
+            within_seconds: 24 * 3600,
+        }],
+    };
+    let summary = adapter.execute(&plan).await.expect("execute");
+    assert_eq!(summary.verdict, Verdict::Fail);
+    let msg = summary.assertions[0]
+        .message
+        .as_ref()
+        .expect("message present on fail");
+    assert!(
+        msg.contains("updated_at"),
+        "message should reference column, got: {msg:?}"
+    );
+}
+
+#[tokio::test]
+async fn freshness_fails_on_empty_table() {
+    let (_pg, url) = postgres().await;
+
+    let client = raw_client(&url).await;
+    client
+        .batch_execute("CREATE TABLE events (id SERIAL PRIMARY KEY, updated_at TIMESTAMPTZ);")
+        .await
+        .expect("setup");
+
+    let adapter = PostgresAdapter::connect(&url).await.expect("adapter");
+    let plan = ProbePlan {
+        schema: None,
+        table: "events".to_string(),
+        assertions: vec![Assertion::Freshness {
+            column: "updated_at".to_string(),
+            within_seconds: 24 * 3600,
+        }],
+    };
+    let summary = adapter.execute(&plan).await.expect("execute");
+    assert_eq!(
+        summary.verdict,
+        Verdict::Fail,
+        "empty table provides no freshness signal — should fail"
+    );
+    let msg = summary.assertions[0]
+        .message
+        .as_ref()
+        .expect("message present on fail");
+    assert!(
+        msg.to_lowercase().contains("no rows") || msg.to_lowercase().contains("empty"),
+        "message should mention emptiness, got: {msg:?}"
+    );
 }

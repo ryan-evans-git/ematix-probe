@@ -58,6 +58,14 @@ pub enum Assertion {
     /// is "at most n". Both `None` is rejected at adapter time
     /// (asserts nothing).
     RowCount { low: Option<i64>, high: Option<i64> },
+    /// Table-level: the most recent value of `column` must be no
+    /// older than `within_seconds`. Adapter computes
+    /// `now() - MAX(<column>)` and fails when the gap exceeds the
+    /// threshold. Empty tables fail (no data → no freshness
+    /// signal). Negative `within_seconds` is rejected at adapter
+    /// time. The Python side parses duration strings like
+    /// `"24h"` / `"6h"` / `"30m"` into seconds.
+    Freshness { column: String, within_seconds: i64 },
 }
 
 /// A complete probe execution plan: which table to probe + the
