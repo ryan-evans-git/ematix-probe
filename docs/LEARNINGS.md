@@ -44,6 +44,24 @@ libpython → green.
 
 Apply this pattern to every future PyO3-bound crate.
 
+## 2026-05-06 — Sprint 1 retro: a 1-week sprint can close in 1 day `process`
+
+Phase 0 was scoped for a 1-week sprint and shipped same-day. Two
+implications:
+
+1. **PI-1 dates are now loose.** The 10-sprint, 10-week PI-1 plan
+   assumed 1 phase ≈ 1 sprint ≈ 1 week. Phase 0 broke that. We're
+   not re-baselining yet — one data point isn't enough — but Sprint
+   2 (Phase 1a, real implementation work) is the velocity test.
+2. **Mid-sprint scope expansion is OK if explicit.** During Sprint 1,
+   user requested mirroring ematix-flow's full CICD (release.yml,
+   SECURITY.md, audit configs, bandit/pip-audit) before continuing.
+   Wasn't in S-1.1..S-1.6. We did it anyway because the request was
+   explicit. Logged as authorized scope expansion in the retro, not
+   silent drift. Future rule: **if scope expands mid-sprint, add a
+   story to the sprint file before doing the work** (even
+   retroactively in the same PR).
+
 ## 2026-05-06 — `set -e` does not catch failures behind a pipe `tooling` `ci`
 
 Ran the Phase 0 gate sweep as `cargo test --workspace 2>&1 | tail -20`

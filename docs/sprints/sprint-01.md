@@ -1,9 +1,9 @@
 # Sprint 1 — Workspace skeleton + green CI
 
-Dates: 2026-05-06 → 2026-05-12
+Dates: 2026-05-06 → 2026-05-06 *(closed early — Phase 0 shipped same-day)*
 PI: PI-1
 Phase: Phase 0
-Status: **active**
+Status: **closed**
 
 ## Goal
 
@@ -70,24 +70,64 @@ pass on a fresh checkout.
 - [x] `maturin develop` succeeds in a clean venv
 - [x] `pytest` green (2 tests)
 - [x] `ruff check .` green
-- [ ] CI workflow green on `phase-0` branch *(verified after first push)*
-- [ ] PR opened against `main`, merged *(after first push)*
-- [x] PRD / PI plan updated for any scope drift *(no drift)*
-- [ ] Retro section below filled in *(end-of-sprint, not end-of-Phase-0)*
+- [x] CI workflow green on `phase-0` branch *(5/5 checks green on PR #1)*
+- [x] PR opened against `main`, merged *(PR #1 merged 2026-05-06)*
+- [x] PRD / PI plan updated for any scope drift *(see drift note in retro)*
+- [x] Retro section below filled in
 
-## Retro (filled at sprint close)
+## Retro (closed 2026-05-06)
 
 ### Kept
--
+- **TDD rhythm worked.** Every story went RED (test compiled-but-failed
+  or asserted the wrong thing) → GREEN (smallest passing impl) → small
+  commit. Three pyo3 binding bugs were caught by the test runner before
+  they could land in `main`. Keep this discipline.
+- **Mirroring ematix-flow's CICD verbatim was the right call.** Saved
+  hours of reinventing wheel-build matrix decisions, audit-toml
+  rationale comments, the `await-ci` shell-loop guard pattern, and the
+  PyO3 macOS link-flag quirks. Strategy for future sprints: *check
+  ematix-flow first*.
+- **Process docs live alongside code.** PRD, PI plan, sprint, and
+  learnings all updated in the same PR as the code. Seeing the whole
+  picture in one diff was high-signal.
 
 ### Improved
--
+- **CWD anchoring in shell commands.** Claude Code's session anchor is
+  `ematix-flow`, but our work is in `ematix-probe`. One verification
+  sweep accidentally compiled ematix-flow's huge workspace before I
+  caught it (1m25s wasted). Going forward: always lead Bash commands
+  with `cd /Users/ryanevans/RustroverProjects/ematix-probe && ...` for
+  ematix-probe work.
+- **Pipe-masked failures.** `cargo test ... 2>&1 | tail -20` made
+  `set -e` blind to a real linker error. Logged in
+  [LEARNINGS.md](../LEARNINGS.md). For CI gate sweeps: don't pipe
+  through `tail`, OR use `set -o pipefail`.
 
 ### Dropped
--
+- **Reflex of "tail the noisy build output."** It hides failures.
+  Stop doing this for status-checking sweeps.
+- **Putting placeholder pyo3 setups together that haven't been
+  end-to-end-tested.** The first attempt enabled `extension-module` at
+  the workspace level and broke `cargo test --workspace` — should have
+  copied ematix-flow's per-crate feature pattern from the start.
 
 ### Learned
--
+- Two technical learnings already in [LEARNINGS.md](../LEARNINGS.md):
+  pyo3 `extension-module` feature gating, and `set -e` + pipe.
+- **Process learning:** Phase 0 was scoped for 1 week but shipped in
+  1 day. PI plan dates are now accurate-but-loose. We'll re-baseline
+  PI-1 dates after Sprint 2 finishes — get one more data point on
+  actual sprint velocity.
 
 ### Drift?
--
+- **In-sprint scope expansion (approved, not drift):** The user asked
+  mid-sprint to mirror ematix-flow's full CICD (release.yml,
+  SECURITY.md, .cargo/audit.toml, bandit, pip-audit, CHANGELOG.md)
+  before continuing. This wasn't in S-1.1..S-1.6 originally. Decision
+  was explicit ("model the CICD process and requirements after what
+  is used for ematix-flow"), so it's an authorized scope expansion,
+  not silent drift. Going forward: if a similar request lands
+  mid-sprint, log it as an explicit story in the sprint file before
+  starting work, even retroactively.
+- **No PRD drift, no PI plan drift.** Phase 0 stories all match what
+  shipped.
