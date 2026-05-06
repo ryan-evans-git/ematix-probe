@@ -3,7 +3,7 @@
 Dates: 2026-05-07 → 2026-05-13
 PI: PI-1
 Phase: Phase 1b
-Status: **planned** *(opens once PR #2 from Sprint 2 merges)*
+Status: **closed** — all 8 stories shipped on `phase-1b`
 
 ## Goal
 
@@ -18,7 +18,7 @@ that drops into a CI runner unmodified.
 
 Each story RED → GREEN → REFACTOR per [PROCESS.md §5](../PROCESS.md).
 
-- [ ] **S-3.1 — `regex` assertion**
+- [x] **S-3.1 — `regex` assertion**
   - RED: integration test seeds rows where one `email` doesn't
     match `r".+@.+\..+"`. Expects `Verdict::Fail`.
   - GREEN: Pushdown SQL `SELECT count(*) FROM <t> WHERE <col> !~ $1`
@@ -26,7 +26,7 @@ Each story RED → GREEN → REFACTOR per [PROCESS.md §5](../PROCESS.md).
     `Assertion::Regex { column, pattern: String }`.
   - REFACTOR: Decide if the regex SQL warrants a shared helper.
 
-- [ ] **S-3.2 — `enum` assertion**
+- [x] **S-3.2 — `enum` assertion**
   - RED: rows with one country code outside `{"US", "CA", ...}`
     → Fail.
   - GREEN: Pushdown
@@ -35,7 +35,7 @@ Each story RED → GREEN → REFACTOR per [PROCESS.md §5](../PROCESS.md).
   - REFACTOR: Parameter-binding helper if multiple assertions
     end up needing variable-arity binding.
 
-- [ ] **S-3.3 — `row_count` (table-level) assertion**
+- [x] **S-3.3 — `row_count` (table-level) assertion**
   - RED: empty table fails `at_least(1)`; oversized table fails
     `at_most(1_000)`.
   - GREEN: Pushdown
@@ -46,7 +46,7 @@ Each story RED → GREEN → REFACTOR per [PROCESS.md §5](../PROCESS.md).
     `Between` and `RowCount` overlap (probably not — RowCount is
     integer, Between is f64).
 
-- [ ] **S-3.4 — `freshness` (table-level) assertion**
+- [x] **S-3.4 — `freshness` (table-level) assertion**
   - RED: table whose `MAX(updated_at)` is 48h old → fails
     `within("24h")`.
   - GREEN: Pushdown
@@ -58,7 +58,7 @@ Each story RED → GREEN → REFACTOR per [PROCESS.md §5](../PROCESS.md).
   - REFACTOR: Split duration parsing into `python/.../duration.py`
     if reused.
 
-- [ ] **S-3.5 — JUnit XML report**
+- [x] **S-3.5 — JUnit XML report**
   - RED: Python test runs a probe + writes JUnit; asserts the
     XML parses with `xml.etree.ElementTree`, has one `<testsuite>`
     per probe, one `<testcase>` per assertion, `<failure>` on
@@ -69,7 +69,7 @@ Each story RED → GREEN → REFACTOR per [PROCESS.md §5](../PROCESS.md).
   - REFACTOR: Pull the writer into a `report.py` module if the
     JSON writer (S-3.6) shares logic.
 
-- [ ] **S-3.6 — JSON report**
+- [x] **S-3.6 — JSON report**
   - RED: probe runs + `report.write_json(path)` produces a file
     that `json.load`s into a stable schema (probe name, verdict,
     timestamps, per-assertion results with messages).
@@ -78,7 +78,7 @@ Each story RED → GREEN → REFACTOR per [PROCESS.md §5](../PROCESS.md).
     `ematix_probe.report.JsonReport` for type-checking
     consumers.
 
-- [ ] **S-3.7 — End-to-end example**
+- [x] **S-3.7 — End-to-end example**
   - Update [examples/](../../examples/) (creating it if needed)
     with a runnable script + README that:
     1. Boots a Postgres testcontainer
@@ -89,17 +89,17 @@ Each story RED → GREEN → REFACTOR per [PROCESS.md §5](../PROCESS.md).
        a CI viewer
   - The PRD §15 example becomes runnable.
 
-- [ ] **S-3.8 — CHANGELOG / sprint / learnings**
+- [x] **S-3.8 — CHANGELOG / sprint / learnings**
 
 ## Definition of Done
 
-- [ ] All Sprint 3 tests green in CI
-- [ ] All Phase 0 + Phase 1a gates still green
-- [ ] CI workflow green on `phase-1b` branch
+- [x] All Sprint 3 tests green in CI
+- [x] All Phase 0 + Phase 1a gates still green
+- [x] CI workflow green on `phase-1b` branch
 - [ ] PR `phase-1b` → `main` opened and merged
-- [ ] CHANGELOG entry under `## [Unreleased]` for Phase 1b
-- [ ] PRD §6.1 example covers all 7 assertions and still type-checks
-- [ ] Retro filled below
+- [x] CHANGELOG entry under `## [Unreleased]` for Phase 1b
+- [x] PRD §6.1 example covers all 7 assertions and still type-checks
+- [x] Retro filled below
 
 ## Out of scope (deferred)
 
@@ -123,16 +123,52 @@ Each story RED → GREEN → REFACTOR per [PROCESS.md §5](../PROCESS.md).
 ## Retro (filled at sprint close)
 
 ### Kept
--
+- Strict RED → GREEN pattern with no wildcard `_ =>` arms in RED
+  commits. Each new `Assertion::*` variant deliberately broke the
+  exhaustive match and the GREEN commit closed it. Same approach
+  as Sprint 2; no friction.
+- Story-level commits (one RED, one GREEN per story) keep the diff
+  surface tight enough to review at the commit level. 13 commits
+  on `phase-1b`, all atomic.
+- Bundling the JUnit and JSON writers under a shared `report.py`
+  module after S-3.5 paid off in S-3.6: the wrapper dataclass +
+  `to_dict` reused everything, no duplicated traversal logic.
 
 ### Improved
--
+- Anchored `Edit` calls on lines *inside* the `impl PostgresAdapter`
+  block, not on the `/// Combine ...` doc that lives below the
+  closing `}`. Cost a re-do twice in S-3.1/S-3.2. Saved as a
+  feedback memory + caught first-try in S-3.3 / S-3.4.
+- Picked the Python wrapper for report metadata over augmenting
+  `core::RunSummary`. Result: zero pyo3 churn for S-3.5/3.6,
+  faster iteration on the Python report shape.
 
 ### Dropped
--
+- All four "REFACTOR: maybe extract a helper" notes from the
+  story specs. Each `run_<assertion>` method ended up small and
+  self-contained — no shared abstraction was justified. Same
+  precedent as Sprint 2 (only S-2.1 had a real REFACTOR commit).
+- `JsonReport` typed-class for type-checking consumers (S-3.6
+  REFACTOR suggestion). The dict-shape is fine; revisit when an
+  external consumer asks.
+- The CI screenshot in the S-3.7 example. The JUnit XML is
+  reporter-agnostic; pasting a screenshot into the README would
+  bloat the repo with no compensating signal. README explains
+  the `dorny/test-reporter` wiring instead.
 
 ### Learned
--
+- See LEARNINGS entry: testcontainers-modules' default Postgres
+  image is `postgres:11-alpine`, not the latest. The freshness
+  query worked there but panicked on PG 14+ because
+  `EXTRACT(EPOCH FROM ...)` returns `numeric` from PG 14 onward.
+  Pin the test image to the version range you intend to support.
+- See LEARNINGS entry: e2e tests through testcontainers' Ryuk
+  reaper occasionally fail to map the reaper's port 8080.
+  `TESTCONTAINERS_RYUK_DISABLED=true` is a viable local
+  workaround; CI should not need it (each job is a fresh runner).
 
 ### Drift?
--
+- None. All 8 stories landed within scope. Out-of-scope items
+  (compound durations like `6h30m`, ECMAScript regex flavors,
+  streaming freshness) stayed deferred per the original sprint
+  plan.

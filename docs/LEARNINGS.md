@@ -115,6 +115,45 @@ implications:
    story to the sprint file before doing the work** (even
    retroactively in the same PR).
 
+## 2026-05-06 — Pin the test Postgres version; PG 14 changed `EXTRACT` return type `tdd` `tooling` `rust`
+
+The freshness adapter (`SELECT EXTRACT(EPOCH FROM (now() - MAX(<col>))) FROM <t>`)
+worked in `cargo test` but panicked in the S-3.7 Python example with
+`error deserializing column 0`. Cause: `EXTRACT` returns `numeric` in
+PG 14+, `double precision` in PG <14. tokio-postgres can deserialize
+`double precision` to `f64` natively but needs the `rust_decimal`
+feature to handle `numeric`.
+
+The Rust integration tests didn't catch it because
+`testcontainers-modules` defaults to `postgres:11-alpine` (still does
+in 0.11.6). The Python e2e ran against `postgres:16-alpine` — same
+schema, different result shape.
+
+Fix: cast the SQL expression explicitly with `::double precision`.
+No-op on older Postgres, correct on newer.
+
+Two transferable lessons:
+1. **When integration tests use a service image, pin it to the
+   version you support.** Defaults shift silently. We should pick a
+   minimum supported PG version (likely 14, since that's what most
+   modern envs run) and pin testcontainers-modules to that tag.
+2. **Cast at the SQL boundary, not in Rust.** Whenever a Postgres
+   expression's result type may differ across server versions, cast
+   to a stable type in the SQL itself rather than picking up a
+   feature-gated decoder on the Rust side.
+
+## 2026-05-06 — pyo3 `Option<T>` parameters need `#[pyo3(signature = ...)]` defaults `pyo3` `rust`
+
+`assertion_row_count(low: Option<i64>, high: Option<i64>)` originally
+required both args to be passed from Python. Adding
+`#[pyo3(signature = (low=None, high=None))]` made them optional with
+explicit `None` defaults, matching the Python `at_least=`/`at_most=`
+keyword-only style the builder needed.
+
+Pattern: `Option<T>` arg in Rust ≠ optional arg in Python signature.
+Always pair with `#[pyo3(signature = ...)]` when you want the Python
+caller to be able to omit it.
+
 ## 2026-05-06 — `set -e` does not catch failures behind a pipe `tooling` `ci`
 
 Ran the Phase 0 gate sweep as `cargo test --workspace 2>&1 | tail -20`
