@@ -1,7 +1,15 @@
-// ematix-probe-core
-//
-// Phase 0 contains only the version constant. Engine, adapters, and
-// assertion DSL land in subsequent phases per docs/PI_PLAN.md.
+//! ematix-probe-core
+//!
+//! Engine + adapter trait + assertion DSL grow phase by phase per
+//! docs/PI_PLAN.md. Top-level surface stays small: the version
+//! constants, the `engine` and `adapters` module trees, and a
+//! curated re-export of the types most callers need.
+
+pub mod adapters;
+pub mod engine;
+
+pub use adapters::data::{AdapterError, DataAdapter};
+pub use engine::data::{Assertion, AssertionResult, ProbePlan, RunSummary, Verdict};
 
 pub const VERSION: &str = "0.1.0-dev";
 

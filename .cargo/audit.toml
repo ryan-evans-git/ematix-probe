@@ -7,8 +7,33 @@
 # Every entry MUST be accompanied by a comment explaining (a) why it
 # can't be patched and (b) why we accept the risk for our use case.
 # Re-evaluate ignores quarterly or whenever a parent dep upgrades.
-#
-# Phase 0: empty list — no transitive advisories yet.
 
 [advisories]
-ignore = []
+ignore = [
+    # ----------------------------------------------------------------
+    # RUSTSEC-2025-0111 — `tokio-tar 0.3.1`. PAX extended-header
+    # parsing flaw permits file smuggling on a maliciously-crafted
+    # tar archive. (a) No fixed upgrade is available; the maintainer
+    # is unresponsive. tokio-tar is pinned transitively via:
+    #   tokio-tar 0.3.1
+    #     └── testcontainers 0.23.3
+    #         └── testcontainers-modules 0.11.6
+    #             └── ematix-probe-core (dev-dependency only)
+    # We track upstream movement on every quarterly audit.
+    #
+    # (b) Risk for our use case: zero.
+    #   - testcontainers is a `[dev-dependencies]` crate. It is NOT
+    #     compiled into the published wheel (`cargo build --release`
+    #     for the maturin wheel uses default features only; dev-deps
+    #     are excluded by Cargo).
+    #   - The vulnerability triggers when *parsing* a tar archive
+    #     created by an attacker. testcontainers' use of tokio-tar
+    #     is to *create* archives that copy operator-controlled
+    #     files INTO test containers. The bytes flow only one way
+    #     (operator → container), and the operator has full control
+    #     over what they archive. There is no scenario in which a
+    #     hostile attacker can hand testcontainers a crafted
+    #     archive to parse.
+    # Re-audit on every testcontainers / bollard / tokio-tar bump.
+    "RUSTSEC-2025-0111",
+]

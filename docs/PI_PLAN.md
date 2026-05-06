@@ -8,8 +8,9 @@ on the last day, PI close on the last sprint of the increment.
 ## PI-1 — v0.1 to PyPI
 
 Dates: 2026-05-06 → 2026-07-15 (10 weeks, 10 sprints)
-Status: **active** (Sprint 2 in flight; Sprint 1 closed early —
-Phase 0 shipped same-day)
+Status: **active** (Sprint 3 in flight; Sprints 1 & 2 closed
+same-day. Schedule running ~9 weeks ahead — re-baseline after
+Sprint 4 with one more data point.)
 
 ### PI goal
 
@@ -30,8 +31,8 @@ they introduce the most new infrastructure.
 | Sprint | Phase | Goal | Status |
 |---|---|---|---|
 | **1** | Phase 0 | Workspace skeleton + green CI | **closed 2026-05-06** ([retro](sprints/sprint-01.md#retro-closed-2026-05-06)) |
-| **2** (this sprint) | Phase 1a | Data probe MVP — Postgres adapter + pushdown SQL for `not_null` / `unique` / `between` | active |
-| **3** | Phase 1b | Data probe MVP — `regex` / `enum` / `row_count` / `freshness`; JUnit + JSON reports; first end-to-end example | planned |
+| **2** | Phase 1a | Data probe MVP — Postgres adapter + pushdown SQL for `not_null` / `unique` / `between` | **closed 2026-05-06** ([retro](sprints/sprint-02.md#retro-closed-2026-05-06)) |
+| **3** (this sprint) | Phase 1b | Data probe MVP — `regex` / `enum` / `row_count` / `freshness`; JUnit + JSON reports; first end-to-end example | active |
 | **4** | Phase 2 | Data probe scan path — Arrow batches in Rust; DuckDB + local Parquet adapters | planned |
 | **5** | Phase 3 | Data probe S3 + distribution assertions (`percentile_between`, `cardinality_between`, `schema_match`) | planned |
 | **6** | Phase 4a | Load probe HTTP MVP — constant-rate scheduler, OTel ExponentialHistogram, `p99_under` / `error_rate_below` | planned |
