@@ -1,0 +1,58 @@
+# Learnings — ematix-probe
+
+Append-only log of findings, surprises, and rules-of-thumb worth
+remembering. Add an entry any time you'd want a future contributor (or
+future-you) to know something that isn't obvious from the code.
+
+Format: one entry per finding, dated, tagged. Don't edit old entries —
+correct them with a new entry that supersedes.
+
+Tags: `process`, `tooling`, `architecture`, `perf`, `tdd`, `drift`,
+`rust`, `python`, `pyo3`, `ci`.
+
+---
+
+## 2026-05-06 — Project kickoff `process`
+
+Decisions made before any code:
+- TDD is non-negotiable for this project (no test → no implementation
+  commit).
+- 1-week sprints, retro at end of every sprint, learnings logged here.
+- PI-1 is 10 sprints targeting v0.1 on PyPI.
+- Process docs ([PROCESS.md](PROCESS.md), [PI_PLAN.md](PI_PLAN.md),
+  per-sprint files, this log) are kept honest in the same PR as code
+  changes that affect them.
+
+Why this matters: ematix-flow shipped without an explicit cadence and
+the late phases lost track of which decisions were intentional vs.
+accidental. Doing the planning + retro work up front for ematix-probe
+is the lesson learned.
+
+## 2026-05-06 — Gate `pyo3/extension-module` behind a feature flag `pyo3` `tooling`
+
+In Phase 0 the workspace `pyo3` dep enabled `extension-module` directly,
+which broke `cargo test --workspace`: cargo builds the `_core` cdylib's
+test binary as a normal executable, but `extension-module` tells pyo3
+*not* to link libpython (the host process is supposed to provide it).
+No host = linker error on `__Py_Dealloc`, `__Py_NoneStruct`, etc.
+
+Fix: define `extension-module` as a *crate feature* on `ematix-probe-py`
+that forwards to `pyo3/extension-module`, and have maturin enable it via
+`[tool.maturin] features = ["ematix-probe-py/extension-module"]`. Plain
+`cargo test` doesn't enable the feature → tests link against a real
+libpython → green.
+
+Apply this pattern to every future PyO3-bound crate.
+
+## 2026-05-06 — `set -e` does not catch failures behind a pipe `tooling` `ci`
+
+Ran the Phase 0 gate sweep as `cargo test --workspace 2>&1 | tail -20`
+and saw "ALL GREEN" even though the test phase had a linker error. The
+last command in the pipeline is `tail`, so its zero exit overrode
+cargo's non-zero — `set -e` only checks the *final* exit status.
+
+Fix: don't pipe failure-sensitive commands through `tail` in CI-style
+sweeps, OR use `set -o pipefail` to propagate the leftmost non-zero
+exit. CI scripts in this repo use neither pipe nor `tail`; humans
+running locally should remember that "looks green" ≠ "is green" when
+output is filtered.
