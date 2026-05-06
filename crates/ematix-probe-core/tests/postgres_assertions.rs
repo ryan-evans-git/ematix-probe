@@ -1,4 +1,4 @@
-//! S-2.3..S-2.5 — per-assertion behavior tests against a real
+//! S-2.3..S-2.5 + S-3.1 — per-assertion behavior tests against a real
 //! Postgres instance via `testcontainers`.
 
 use async_trait::async_trait;
@@ -232,5 +232,76 @@ async fn between_fails_when_values_out_of_range() {
     assert!(
         msg.contains('2'),
         "message should report 2 out-of-range rows, got: {msg:?}"
+    );
+}
+
+#[tokio::test]
+async fn regex_passes_when_all_match() {
+    let (_pg, url) = postgres().await;
+
+    let client = raw_client(&url).await;
+    client
+        .batch_execute(
+            "CREATE TABLE users (id SERIAL PRIMARY KEY, email TEXT);
+             INSERT INTO users (email) VALUES
+               ('a@x.io'), ('b@y.com'), ('carol@example.org');",
+        )
+        .await
+        .expect("setup");
+
+    let adapter = PostgresAdapter::connect(&url).await.expect("adapter");
+    let plan = ProbePlan {
+        schema: None,
+        table: "users".to_string(),
+        assertions: vec![Assertion::Regex {
+            column: "email".to_string(),
+            pattern: r".+@.+\..+".to_string(),
+        }],
+    };
+    let summary = adapter.execute(&plan).await.expect("execute");
+    assert_eq!(summary.verdict, Verdict::Pass);
+    assert_eq!(summary.assertions.len(), 1);
+    assert_eq!(summary.assertions[0].verdict, Verdict::Pass);
+}
+
+#[tokio::test]
+async fn regex_fails_when_any_value_violates() {
+    let (_pg, url) = postgres().await;
+
+    let client = raw_client(&url).await;
+    client
+        .batch_execute(
+            "CREATE TABLE users (id SERIAL PRIMARY KEY, email TEXT);
+             -- 'not-an-email' lacks the '@'+TLD shape, NULL is not
+             -- a violation (NULL ~ pat is unknown).
+             INSERT INTO users (email) VALUES
+               ('a@x.io'), ('not-an-email'), (NULL), ('b@y.com');",
+        )
+        .await
+        .expect("setup");
+
+    let adapter = PostgresAdapter::connect(&url).await.expect("adapter");
+    let plan = ProbePlan {
+        schema: None,
+        table: "users".to_string(),
+        assertions: vec![Assertion::Regex {
+            column: "email".to_string(),
+            pattern: r".+@.+\..+".to_string(),
+        }],
+    };
+    let summary = adapter.execute(&plan).await.expect("execute");
+    assert_eq!(
+        summary.verdict,
+        Verdict::Fail,
+        "one non-matching email should fail the assertion"
+    );
+    let msg = summary.assertions[0]
+        .message
+        .as_ref()
+        .expect("message present on fail");
+    assert!(msg.contains("email"), "message should reference column, got: {msg:?}");
+    assert!(
+        msg.contains('1'),
+        "message should report 1 non-matching row, got: {msg:?}"
     );
 }

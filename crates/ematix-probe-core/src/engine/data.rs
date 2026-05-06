@@ -38,6 +38,13 @@ pub enum Assertion {
     /// counted as violations (SQL `NULL < x` is unknown); pair
     /// with `NotNull` to forbid them too.
     Between { column: String, low: f64, high: f64 },
+    /// All non-NULL values in `column` must match the POSIX regex
+    /// `pattern` (Postgres `~` operator). NULL values are *not*
+    /// counted as violations; pair with `NotNull` to forbid them.
+    /// `pattern` is the POSIX regex string as accepted by Postgres;
+    /// it is *not* a Python `re` pattern, though most common
+    /// character-class syntax overlaps.
+    Regex { column: String, pattern: String },
 }
 
 /// A complete probe execution plan: which table to probe + the
