@@ -82,7 +82,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install 'maturin>=1.7' pytest 'pytest-asyncio>=0.23' ruff bandit pip-audit \
-            'testcontainers[postgres]>=4.0'
+            'testcontainers[postgres]>=4.0' psycopg2-binary
       - name: Build extension
         run: maturin develop --release
       - name: Lint

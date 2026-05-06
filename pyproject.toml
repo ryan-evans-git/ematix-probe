@@ -51,6 +51,7 @@ dev = [
     "bandit>=1.7",
     "pip-audit>=2.7",
     "testcontainers[postgres]>=4.0",
+    "psycopg2-binary>=2.9",
 ]
 
 [tool.maturin]
