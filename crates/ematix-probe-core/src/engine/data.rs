@@ -37,11 +37,7 @@ pub enum Assertion {
     /// inclusive range `[low, high]`. NULL values are *not*
     /// counted as violations (SQL `NULL < x` is unknown); pair
     /// with `NotNull` to forbid them too.
-    Between {
-        column: String,
-        low: f64,
-        high: f64,
-    },
+    Between { column: String, low: f64, high: f64 },
 }
 
 /// A complete probe execution plan: which table to probe + the

@@ -44,6 +44,23 @@ libpython → green.
 
 Apply this pattern to every future PyO3-bound crate.
 
+## 2026-05-06 — Postgres infers parameter types from the LHS column `pyo3` `tooling` `rust`
+
+S-2.5 (`Between` assertion) with f64 bounds and an INT column hit:
+`error serializing parameter 0`. The query `WHERE col < $1` made
+Postgres infer `$1`'s type from `col` (INT). tokio-postgres, told
+to send an f64, refused to coerce.
+
+Fix: explicit `$1::float8` cast on the placeholder. Postgres now
+sees `$1` as FLOAT8 and applies its own implicit cast on the LHS
+column. As a bonus, this lets Between work on INT, BIGINT, NUMERIC,
+or DOUBLE PRECISION columns without per-type SQL.
+
+Pattern: when a parameterized SQL fragment compares a typed-Rust
+value against a column whose Postgres type may differ, cast the
+*placeholder*, not the column — e.g. `$1::float8`, `$1::text`. Keep
+the column reference clean so indexes still apply.
+
 ## 2026-05-06 — Dev-only deps still trigger `cargo audit` advisories `rust` `tooling` `ci`
 
 Adding `testcontainers-modules` as a `[dev-dependencies]` pulled in

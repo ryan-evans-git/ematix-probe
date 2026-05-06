@@ -76,6 +76,9 @@ impl DataAdapter for PostgresAdapter {
             let result = match assertion {
                 Assertion::NotNull { column } => self.run_not_null(plan, idx, column).await?,
                 Assertion::Unique { column } => self.run_unique(plan, idx, column).await?,
+                Assertion::Between { column, low, high } => {
+                    self.run_between(plan, idx, column, *low, *high).await?
+                }
             };
             results.push(result);
         }
@@ -172,6 +175,57 @@ impl PostgresAdapter {
                 verdict: Verdict::Fail,
                 message: Some(format!(
                     "column {column:?} has {dup_value_count} value(s) appearing more than once"
+                )),
+            })
+        }
+    }
+
+    /// Pushdown SQL for `Between` (inclusive range, NULL-safe):
+    ///   `SELECT count(*) FROM <t> WHERE <col> < $1 OR <col> > $2`
+    /// Pass at 0; Fail with out-of-range row count otherwise.
+    /// `$1` / `$2` bind as `FLOAT8` so non-float columns (INT,
+    /// NUMERIC, …) are implicitly cast by Postgres at compare-time.
+    async fn run_between(
+        &self,
+        plan: &ProbePlan,
+        idx: usize,
+        column: &str,
+        low: f64,
+        high: f64,
+    ) -> Result<AssertionResult, AdapterError> {
+        let table = qualified_table(plan.schema.as_deref(), &plan.table);
+        let col = quote_ident(column);
+        // Explicit `::float8` casts on the placeholders — without
+        // them Postgres infers $1 / $2 from the LHS column type
+        // (e.g. INT) and tokio-postgres can't serialize the f64
+        // arguments. The casts also let us probe NUMERIC, INT,
+        // BIGINT, and DOUBLE PRECISION columns from one shape.
+        let sql =
+            format!("SELECT count(*) FROM {table} WHERE {col} < $1::float8 OR {col} > $2::float8");
+
+        let client = self
+            .pool
+            .get()
+            .await
+            .map_err(|e| AdapterError::Connection(format!("acquire failed: {e}")))?;
+        let row = client
+            .query_one(&sql, &[&low, &high])
+            .await
+            .map_err(|e| AdapterError::Query(format!("between query failed: {e}")))?;
+        let oor_count: i64 = row.get(0);
+
+        if oor_count == 0 {
+            Ok(AssertionResult {
+                assertion_index: idx,
+                verdict: Verdict::Pass,
+                message: None,
+            })
+        } else {
+            Ok(AssertionResult {
+                assertion_index: idx,
+                verdict: Verdict::Fail,
+                message: Some(format!(
+                    "column {column:?} has {oor_count} row(s) outside [{low}, {high}]"
                 )),
             })
         }
