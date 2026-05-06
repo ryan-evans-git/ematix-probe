@@ -1,5 +1,5 @@
-//! S-2.3..S-2.5 + S-3.1 — per-assertion behavior tests against a real
-//! Postgres instance via `testcontainers`.
+//! S-2.3..S-2.5 + S-3.1..S-3.2 — per-assertion behavior tests against
+//! a real Postgres instance via `testcontainers`.
 
 use async_trait::async_trait;
 use ematix_probe_core::adapters::data::postgres::PostgresAdapter;
@@ -303,5 +303,70 @@ async fn regex_fails_when_any_value_violates() {
     assert!(
         msg.contains('1'),
         "message should report 1 non-matching row, got: {msg:?}"
+    );
+}
+
+#[tokio::test]
+async fn enum_passes_when_all_values_in_allowed_set() {
+    let (_pg, url) = postgres().await;
+
+    let client = raw_client(&url).await;
+    client
+        .batch_execute(
+            "CREATE TABLE shipments (id SERIAL PRIMARY KEY, country TEXT);
+             INSERT INTO shipments (country) VALUES
+               ('US'), ('CA'), ('US'), ('MX'), ('CA');",
+        )
+        .await
+        .expect("setup");
+
+    let adapter = PostgresAdapter::connect(&url).await.expect("adapter");
+    let plan = ProbePlan {
+        schema: None,
+        table: "shipments".to_string(),
+        assertions: vec![Assertion::Enum {
+            column: "country".to_string(),
+            allowed: vec!["US".to_string(), "CA".to_string(), "MX".to_string()],
+        }],
+    };
+    let summary = adapter.execute(&plan).await.expect("execute");
+    assert_eq!(summary.verdict, Verdict::Pass);
+    assert_eq!(summary.assertions[0].verdict, Verdict::Pass);
+}
+
+#[tokio::test]
+async fn enum_fails_when_value_outside_allowed_set() {
+    let (_pg, url) = postgres().await;
+
+    let client = raw_client(&url).await;
+    client
+        .batch_execute(
+            "CREATE TABLE shipments (id SERIAL PRIMARY KEY, country TEXT);
+             -- 'ZZ' is the violation; NULL is not counted.
+             INSERT INTO shipments (country) VALUES
+               ('US'), ('ZZ'), (NULL), ('CA');",
+        )
+        .await
+        .expect("setup");
+
+    let adapter = PostgresAdapter::connect(&url).await.expect("adapter");
+    let plan = ProbePlan {
+        schema: None,
+        table: "shipments".to_string(),
+        assertions: vec![Assertion::Enum {
+            column: "country".to_string(),
+            allowed: vec!["US".to_string(), "CA".to_string(), "MX".to_string()],
+        }],
+    };
+    let summary = adapter.execute(&plan).await.expect("execute");
+    assert_eq!(summary.verdict, Verdict::Fail);
+    let msg = summary.assertions[0]
+        .message
+        .as_ref()
+        .expect("message present on fail");
+    assert!(msg.contains("country"), "message: {msg:?}");
+    assert!(
+        msg.contains('1'),
+        "message should report 1 disallowed row, got: {msg:?}"
     );
 }

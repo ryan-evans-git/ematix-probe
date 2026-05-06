@@ -45,6 +45,13 @@ pub enum Assertion {
     /// it is *not* a Python `re` pattern, though most common
     /// character-class syntax overlaps.
     Regex { column: String, pattern: String },
+    /// All non-NULL values in `column` must appear in `allowed`.
+    /// NULL values are *not* counted as violations (`NULL NOT IN
+    /// (...)` is NULL, which `WHERE` treats as false); pair with
+    /// `NotNull` to forbid them. Empty `allowed` is rejected at
+    /// adapter time (every non-NULL row would violate, which is
+    /// almost certainly user error).
+    Enum { column: String, allowed: Vec<String> },
 }
 
 /// A complete probe execution plan: which table to probe + the
