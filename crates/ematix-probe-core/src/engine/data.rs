@@ -28,6 +28,11 @@ pub enum Verdict {
 pub enum Assertion {
     /// `column IS NULL` count must be zero.
     NotNull { column: String },
+    /// All non-NULL values in `column` must appear at most once.
+    /// (Postgres treats NULLs as distinct in GROUP BY, so they
+    /// don't violate uniqueness — pair with `NotNull` to forbid
+    /// them.)
+    Unique { column: String },
 }
 
 /// A complete probe execution plan: which table to probe + the

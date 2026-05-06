@@ -107,3 +107,65 @@ async fn not_null_fails_when_any_null() {
         "message should reference the failing-row count (2), got: {msg:?}"
     );
 }
+
+#[tokio::test]
+async fn unique_passes_when_all_distinct() {
+    let (_pg, url) = postgres().await;
+
+    let client = raw_client(&url).await;
+    client
+        .batch_execute(
+            "CREATE TABLE orders (id SERIAL PRIMARY KEY, customer_id INT);
+             INSERT INTO orders (customer_id) VALUES (1), (2), (3), (4);",
+        )
+        .await
+        .expect("setup");
+
+    let adapter = PostgresAdapter::connect(&url).await.expect("adapter");
+    let plan = ProbePlan {
+        schema: None,
+        table: "orders".to_string(),
+        assertions: vec![Assertion::Unique {
+            column: "customer_id".to_string(),
+        }],
+    };
+    let summary = adapter.execute(&plan).await.expect("execute");
+    assert_eq!(summary.verdict, Verdict::Pass);
+    assert_eq!(summary.assertions[0].verdict, Verdict::Pass);
+}
+
+#[tokio::test]
+async fn unique_fails_when_duplicates_present() {
+    let (_pg, url) = postgres().await;
+
+    let client = raw_client(&url).await;
+    client
+        .batch_execute(
+            "CREATE TABLE orders (id SERIAL PRIMARY KEY, customer_id INT);
+             INSERT INTO orders (customer_id) VALUES (1), (2), (1), (3), (2), (2);",
+        )
+        .await
+        .expect("setup");
+    // customer_id 1 appears twice, customer_id 2 appears thrice.
+    // Two distinct values violate uniqueness.
+
+    let adapter = PostgresAdapter::connect(&url).await.expect("adapter");
+    let plan = ProbePlan {
+        schema: None,
+        table: "orders".to_string(),
+        assertions: vec![Assertion::Unique {
+            column: "customer_id".to_string(),
+        }],
+    };
+    let summary = adapter.execute(&plan).await.expect("execute");
+    assert_eq!(summary.verdict, Verdict::Fail);
+    let msg = summary.assertions[0]
+        .message
+        .as_ref()
+        .expect("message present on fail");
+    assert!(msg.contains("customer_id"), "message: {msg:?}");
+    assert!(
+        msg.contains('2'),
+        "message should mention the count of dup values (2), got: {msg:?}"
+    );
+}
