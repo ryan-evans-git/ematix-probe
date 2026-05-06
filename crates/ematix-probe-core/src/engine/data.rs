@@ -52,6 +52,12 @@ pub enum Assertion {
     /// adapter time (every non-NULL row would violate, which is
     /// almost certainly user error).
     Enum { column: String, allowed: Vec<String> },
+    /// Table-level: `count(*)` must lie within `[low, high]`,
+    /// where either bound may be `None` to denote "unbounded on
+    /// that side". `low: Some(n)` is "at least n"; `high: Some(n)`
+    /// is "at most n". Both `None` is rejected at adapter time
+    /// (asserts nothing).
+    RowCount { low: Option<i64>, high: Option<i64> },
 }
 
 /// A complete probe execution plan: which table to probe + the

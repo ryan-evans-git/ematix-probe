@@ -1,4 +1,4 @@
-//! S-2.3..S-2.5 + S-3.1..S-3.2 — per-assertion behavior tests against
+//! S-2.3..S-2.5 + S-3.1..S-3.3 — per-assertion behavior tests against
 //! a real Postgres instance via `testcontainers`.
 
 use async_trait::async_trait;
@@ -369,4 +369,96 @@ async fn enum_fails_when_value_outside_allowed_set() {
         msg.contains('1'),
         "message should report 1 disallowed row, got: {msg:?}"
     );
+}
+
+#[tokio::test]
+async fn row_count_at_least_fails_on_empty_table() {
+    let (_pg, url) = postgres().await;
+
+    let client = raw_client(&url).await;
+    client
+        .batch_execute("CREATE TABLE events (id SERIAL PRIMARY KEY, payload TEXT);")
+        .await
+        .expect("setup");
+
+    let adapter = PostgresAdapter::connect(&url).await.expect("adapter");
+    let plan = ProbePlan {
+        schema: None,
+        table: "events".to_string(),
+        assertions: vec![Assertion::RowCount {
+            low: Some(1),
+            high: None,
+        }],
+    };
+    let summary = adapter.execute(&plan).await.expect("execute");
+    assert_eq!(
+        summary.verdict,
+        Verdict::Fail,
+        "empty table should fail at_least(1)"
+    );
+    let msg = summary.assertions[0]
+        .message
+        .as_ref()
+        .expect("message present on fail");
+    assert!(msg.contains('0'), "message should mention actual count 0, got: {msg:?}");
+    assert!(msg.contains('1'), "message should mention low bound 1, got: {msg:?}");
+}
+
+#[tokio::test]
+async fn row_count_at_most_fails_when_oversized() {
+    let (_pg, url) = postgres().await;
+
+    let client = raw_client(&url).await;
+    // Insert 1500 rows so at_most(1000) fails by 500.
+    client
+        .batch_execute(
+            "CREATE TABLE events (id SERIAL PRIMARY KEY, payload TEXT);
+             INSERT INTO events (payload) SELECT 'x' FROM generate_series(1, 1500);",
+        )
+        .await
+        .expect("setup");
+
+    let adapter = PostgresAdapter::connect(&url).await.expect("adapter");
+    let plan = ProbePlan {
+        schema: None,
+        table: "events".to_string(),
+        assertions: vec![Assertion::RowCount {
+            low: None,
+            high: Some(1000),
+        }],
+    };
+    let summary = adapter.execute(&plan).await.expect("execute");
+    assert_eq!(summary.verdict, Verdict::Fail);
+    let msg = summary.assertions[0]
+        .message
+        .as_ref()
+        .expect("message present on fail");
+    assert!(msg.contains("1500"), "message should mention actual count 1500, got: {msg:?}");
+    assert!(msg.contains("1000"), "message should mention high bound 1000, got: {msg:?}");
+}
+
+#[tokio::test]
+async fn row_count_passes_when_in_range() {
+    let (_pg, url) = postgres().await;
+
+    let client = raw_client(&url).await;
+    client
+        .batch_execute(
+            "CREATE TABLE events (id SERIAL PRIMARY KEY, payload TEXT);
+             INSERT INTO events (payload) SELECT 'x' FROM generate_series(1, 50);",
+        )
+        .await
+        .expect("setup");
+
+    let adapter = PostgresAdapter::connect(&url).await.expect("adapter");
+    let plan = ProbePlan {
+        schema: None,
+        table: "events".to_string(),
+        assertions: vec![Assertion::RowCount {
+            low: Some(1),
+            high: Some(100),
+        }],
+    };
+    let summary = adapter.execute(&plan).await.expect("execute");
+    assert_eq!(summary.verdict, Verdict::Pass);
 }
