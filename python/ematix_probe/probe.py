@@ -27,11 +27,13 @@ from ematix_probe._core import (
     ProbePlan,
     RunReport,
     assertion_between,
+    assertion_freshness,
     assertion_not_null,
     assertion_unique,
     run_postgres_probe,
 )
 
+from .duration import parse_duration
 from .source import Source
 
 
@@ -45,6 +47,7 @@ class _AssertionSpec:
     column: str
     low: float | None = None
     high: float | None = None
+    within_seconds: int | None = None
 
 
 class _ColumnRef:
@@ -80,9 +83,9 @@ class _ColumnRef:
 
 class Tester:
     """The `t` argument the decorated function receives. Yields
-    `_ColumnRef` builders via `t.column(name)`. Currently column-
-    only; table-level assertions (`row_count`, `freshness`) land in
-    Phase 1b."""
+    `_ColumnRef` builders via `t.column(name)`. Table-level checks
+    (currently `freshness`; `row_count` lands when the e2e example
+    in S-3.7 wires it through) live directly on the `Tester`."""
 
     __slots__ = ("_specs",)
 
@@ -91,6 +94,19 @@ class Tester:
 
     def column(self, name: str) -> _ColumnRef:
         return _ColumnRef(self, name)
+
+    def freshness(self, column: str, *, within: str) -> Tester:
+        """Assert that the most recent value of `column` is no older
+        than `within`. `within` is a duration string (`"24h"`,
+        `"30m"`, …) parsed by `parse_duration`."""
+        self._add(
+            _AssertionSpec(
+                kind="freshness",
+                column=column,
+                within_seconds=parse_duration(within),
+            )
+        )
+        return self
 
     def _add(self, spec: _AssertionSpec) -> None:
         self._specs.append(spec)
@@ -171,6 +187,9 @@ def _to_rust(spec: _AssertionSpec):
     if spec.kind == "between":
         assert spec.low is not None and spec.high is not None
         return assertion_between(spec.column, spec.low, spec.high)
+    if spec.kind == "freshness":
+        assert spec.within_seconds is not None
+        return assertion_freshness(spec.column, spec.within_seconds)
     # _AssertionSpec is internal — unknown kinds indicate a bug,
     # not a user error.
     raise AssertionError(f"unknown assertion kind: {spec.kind!r}")

@@ -47,6 +47,7 @@ impl PyAssertion {
             core::Assertion::NotNull { .. } => "not_null",
             core::Assertion::Unique { .. } => "unique",
             core::Assertion::Between { .. } => "between",
+            core::Assertion::Freshness { .. } => "freshness",
             _ => "unknown",
         }
     }
@@ -225,6 +226,16 @@ fn assertion_between(column: String, low: f64, high: f64) -> PyAssertion {
     }
 }
 
+#[pyfunction]
+fn assertion_freshness(column: String, within_seconds: i64) -> PyAssertion {
+    PyAssertion {
+        inner: core::Assertion::Freshness {
+            column,
+            within_seconds,
+        },
+    }
+}
+
 #[pymodule]
 fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("__version__", core::VERSION)?;
@@ -235,6 +246,7 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(assertion_not_null, m)?)?;
     m.add_function(wrap_pyfunction!(assertion_unique, m)?)?;
     m.add_function(wrap_pyfunction!(assertion_between, m)?)?;
+    m.add_function(wrap_pyfunction!(assertion_freshness, m)?)?;
     m.add_function(wrap_pyfunction!(run_postgres_probe, m)?)?;
     Ok(())
 }

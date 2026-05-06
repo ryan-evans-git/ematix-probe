@@ -88,6 +88,9 @@ impl DataAdapter for PostgresAdapter {
                 Assertion::RowCount { low, high } => {
                     self.run_row_count(plan, idx, *low, *high).await?
                 }
+                Assertion::Freshness { column, within_seconds } => {
+                    self.run_freshness(plan, idx, column, *within_seconds).await?
+                }
             };
             results.push(result);
         }
@@ -407,6 +410,70 @@ impl PostgresAdapter {
                     plan.table
                 )),
             })
+        }
+    }
+
+    /// Pushdown SQL for `Freshness` (table-level):
+    ///   `SELECT EXTRACT(EPOCH FROM (now() - MAX(<col>))) FROM <t>`
+    /// The `EXTRACT(EPOCH FROM <interval>)` returns the gap in
+    /// seconds as `double precision`. NULL when the table is empty
+    /// (MAX of nothing is NULL → interval is NULL → extract is NULL),
+    /// which we treat as Fail-with-no-rows: an empty table provides
+    /// no freshness signal, so the data-quality verdict is Fail
+    /// rather than Error (Error would imply we couldn't evaluate
+    /// the check, but we did — there's just nothing to be fresh).
+    /// Negative `within_seconds` is rejected as
+    /// `AdapterError::Config`.
+    async fn run_freshness(
+        &self,
+        plan: &ProbePlan,
+        idx: usize,
+        column: &str,
+        within_seconds: i64,
+    ) -> Result<AssertionResult, AdapterError> {
+        if within_seconds < 0 {
+            return Err(AdapterError::Config(format!(
+                "freshness assertion on column {column:?} has negative within_seconds ({within_seconds})"
+            )));
+        }
+
+        let table = qualified_table(plan.schema.as_deref(), &plan.table);
+        let col = quote_ident(column);
+        let sql = format!("SELECT EXTRACT(EPOCH FROM (now() - MAX({col}))) FROM {table}");
+
+        let client = self
+            .pool
+            .get()
+            .await
+            .map_err(|e| AdapterError::Connection(format!("acquire failed: {e}")))?;
+        let row = client
+            .query_one(&sql, &[])
+            .await
+            .map_err(|e| AdapterError::Query(format!("freshness query failed: {e}")))?;
+        let age_seconds: Option<f64> = row.get(0);
+
+        match age_seconds {
+            None => Ok(AssertionResult {
+                assertion_index: idx,
+                verdict: Verdict::Fail,
+                message: Some(format!(
+                    "table {:?} has no rows; cannot evaluate freshness on column {column:?}",
+                    plan.table
+                )),
+            }),
+            Some(age) if age <= within_seconds as f64 => Ok(AssertionResult {
+                assertion_index: idx,
+                verdict: Verdict::Pass,
+                message: None,
+            }),
+            Some(age) => Ok(AssertionResult {
+                assertion_index: idx,
+                verdict: Verdict::Fail,
+                message: Some(format!(
+                    "column {column:?}: most recent value is {age:.0}s old; \
+                     expected within {within_seconds}s"
+                )),
+            }),
         }
     }
 }
