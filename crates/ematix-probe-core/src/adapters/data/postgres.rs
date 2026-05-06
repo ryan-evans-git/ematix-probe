@@ -439,7 +439,13 @@ impl PostgresAdapter {
 
         let table = qualified_table(plan.schema.as_deref(), &plan.table);
         let col = quote_ident(column);
-        let sql = format!("SELECT EXTRACT(EPOCH FROM (now() - MAX({col}))) FROM {table}");
+        // Cast to double precision: in PG 14+ EXTRACT returns
+        // `numeric`, which tokio-postgres can't deserialize to f64
+        // without the rust_decimal feature. PG <14 returned float8
+        // already; the cast is a no-op there.
+        let sql = format!(
+            "SELECT EXTRACT(EPOCH FROM (now() - MAX({col})))::double precision FROM {table}"
+        );
 
         let client = self
             .pool

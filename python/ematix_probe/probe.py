@@ -27,8 +27,11 @@ from datetime import datetime, timezone
 from ematix_probe._core import (
     ProbePlan,
     assertion_between,
+    assertion_enum,
     assertion_freshness,
     assertion_not_null,
+    assertion_regex,
+    assertion_row_count,
     assertion_unique,
     run_postgres_probe,
 )
@@ -45,10 +48,15 @@ class _AssertionSpec:
     plan."""
 
     kind: str
-    column: str
+    # column is empty for table-level checks like row_count.
+    column: str = ""
     low: float | None = None
     high: float | None = None
     within_seconds: int | None = None
+    pattern: str | None = None
+    allowed: tuple[str, ...] | None = None
+    row_low: int | None = None
+    row_high: int | None = None
 
 
 class _ColumnRef:
@@ -81,12 +89,32 @@ class _ColumnRef:
         )
         return self
 
+    def regex(self, pattern: str) -> _ColumnRef:
+        """Assert every non-NULL value matches the Postgres POSIX
+        regex `pattern`. NULLs are not counted as violations — pair
+        with `.not_null()` to forbid them."""
+        self._tester._add(
+            _AssertionSpec(kind="regex", column=self._name, pattern=pattern)
+        )
+        return self
+
+    def is_in(self, allowed: list[str]) -> _ColumnRef:
+        """Assert every value is one of `allowed`. Named `is_in` to
+        avoid shadowing the Python keyword `in`."""
+        self._tester._add(
+            _AssertionSpec(
+                kind="enum",
+                column=self._name,
+                allowed=tuple(allowed),
+            )
+        )
+        return self
+
 
 class Tester:
     """The `t` argument the decorated function receives. Yields
     `_ColumnRef` builders via `t.column(name)`. Table-level checks
-    (currently `freshness`; `row_count` lands when the e2e example
-    in S-3.7 wires it through) live directly on the `Tester`."""
+    (`row_count`, `freshness`) live directly on the `Tester`."""
 
     __slots__ = ("_specs",)
 
@@ -95,6 +123,29 @@ class Tester:
 
     def column(self, name: str) -> _ColumnRef:
         return _ColumnRef(self, name)
+
+    def row_count(
+        self,
+        *,
+        at_least: int | None = None,
+        at_most: int | None = None,
+    ) -> Tester:
+        """Assert the table's row count is within bounds. At least
+        one of `at_least` / `at_most` must be supplied — passing
+        neither asserts nothing and is rejected as a programming
+        error."""
+        if at_least is None and at_most is None:
+            raise ValueError(
+                "row_count() requires at least one of at_least= or at_most="
+            )
+        self._add(
+            _AssertionSpec(
+                kind="row_count",
+                row_low=at_least,
+                row_high=at_most,
+            )
+        )
+        return self
 
     def freshness(self, column: str, *, within: str) -> Tester:
         """Assert that the most recent value of `column` is no older
@@ -207,7 +258,7 @@ def _assertion_name(spec: _AssertionSpec) -> str:
     """Human label for the report. Column-level checks read as
     ``"<column>.<kind>"``; table-level reads as ``"<kind>(<column>)"``
     or just ``"<kind>"`` when there's no associated column."""
-    if spec.kind in ("not_null", "unique", "between"):
+    if spec.kind in ("not_null", "unique", "between", "regex", "enum"):
         return f"{spec.column}.{spec.kind}"
     if spec.kind == "freshness":
         return f"freshness({spec.column})"
@@ -224,6 +275,14 @@ def _to_rust(spec: _AssertionSpec):
     if spec.kind == "between":
         assert spec.low is not None and spec.high is not None
         return assertion_between(spec.column, spec.low, spec.high)
+    if spec.kind == "regex":
+        assert spec.pattern is not None
+        return assertion_regex(spec.column, spec.pattern)
+    if spec.kind == "enum":
+        assert spec.allowed is not None
+        return assertion_enum(spec.column, list(spec.allowed))
+    if spec.kind == "row_count":
+        return assertion_row_count(spec.row_low, spec.row_high)
     if spec.kind == "freshness":
         assert spec.within_seconds is not None
         return assertion_freshness(spec.column, spec.within_seconds)
