@@ -75,6 +75,7 @@ impl DataAdapter for PostgresAdapter {
         for (idx, assertion) in plan.assertions.iter().enumerate() {
             let result = match assertion {
                 Assertion::NotNull { column } => self.run_not_null(plan, idx, column).await?,
+                Assertion::Unique { column } => self.run_unique(plan, idx, column).await?,
             };
             results.push(result);
         }
@@ -122,6 +123,55 @@ impl PostgresAdapter {
                 verdict: Verdict::Fail,
                 message: Some(format!(
                     "column {column:?} has {null_count} NULL row(s); expected 0"
+                )),
+            })
+        }
+    }
+
+    /// Pushdown SQL for `Unique`. Counts the number of distinct
+    /// values that appear more than once:
+    ///   `SELECT count(*) FROM (SELECT col, count(*) c FROM <t>
+    ///    GROUP BY col HAVING count(*) > 1) d`
+    /// Pass when 0; Fail with "N values" detail otherwise. Postgres
+    /// `GROUP BY` treats NULLs as equal, so multiple NULLs ARE
+    /// reported as a duplicate — pair with `NotNull` if that's
+    /// undesired.
+    async fn run_unique(
+        &self,
+        plan: &ProbePlan,
+        idx: usize,
+        column: &str,
+    ) -> Result<AssertionResult, AdapterError> {
+        let table = qualified_table(plan.schema.as_deref(), &plan.table);
+        let col = quote_ident(column);
+        let sql = format!(
+            "SELECT count(*) FROM \
+             (SELECT {col} FROM {table} GROUP BY {col} HAVING count(*) > 1) d"
+        );
+
+        let client = self
+            .pool
+            .get()
+            .await
+            .map_err(|e| AdapterError::Connection(format!("acquire failed: {e}")))?;
+        let row = client
+            .query_one(&sql, &[])
+            .await
+            .map_err(|e| AdapterError::Query(format!("unique query failed: {e}")))?;
+        let dup_value_count: i64 = row.get(0);
+
+        if dup_value_count == 0 {
+            Ok(AssertionResult {
+                assertion_index: idx,
+                verdict: Verdict::Pass,
+                message: None,
+            })
+        } else {
+            Ok(AssertionResult {
+                assertion_index: idx,
+                verdict: Verdict::Fail,
+                message: Some(format!(
+                    "column {column:?} has {dup_value_count} value(s) appearing more than once"
                 )),
             })
         }
