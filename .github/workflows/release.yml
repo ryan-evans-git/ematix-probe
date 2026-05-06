@@ -1,0 +1,253 @@
+name: release
+
+# Triggers:
+#   - `v*` git tags push to PyPI (production release).
+#   - `workflow_dispatch` manually (test wheel build without
+#     publishing — useful for verifying a matrix change before
+#     cutting a tag).
+#
+# PyPI trusted-publishing setup (required, one-time):
+# https://docs.pypi.org/trusted-publishers/
+#   1. On https://pypi.org/manage/project/ematix-probe/settings/publishing/
+#      add a pending publisher: Owner = ryan-evans-git, Repo = ematix-probe,
+#      Workflow = release.yml, Environment = pypi.
+#   2. After the first publish from this workflow, the trusted-publisher
+#      record becomes permanent.
+#
+# Wheel-build philosophy:
+#   - 6 wheels per release: linux-x86_64 × {py3.11, py3.12, py3.13}
+#     and macos-aarch64 × {py3.11, py3.12, py3.13}. Plus one sdist
+#     for every other (OS, arch, Python) combination.
+#   - One wheel per (OS, arch, Python). Linux uses the manylinux_2_28
+#     container so wheels run on every glibc-2.28+ system.
+#   - macOS: aarch64 (Apple Silicon) only. Apple Silicon covers every
+#     Mac shipped since Nov 2020. Intel-Mac users can still
+#     `pip install ematix-probe` from the sdist (needs Rust locally;
+#     one extra step).
+#   - Windows: NOT BUILT in v0.1. Add a Windows job here when a
+#     pinned Postgres / DuckDB / object_store stack is verified
+#     against the MSVC toolchain.
+#   - Source distribution (sdist) is built once on Linux and includes
+#     the full Rust workspace so `pip install --no-binary` works.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  # Gate the wheel matrix on `ci.yml` succeeding for the SAME SHA.
+  # Tag pushes typically follow a `git push origin main && git push
+  # origin v0.x.0` sequence — both events fire on the same commit,
+  # so ci.yml is in flight (or already done) by the time release.yml
+  # reaches this job. Waiting for it is meaningfully cheaper than
+  # re-running fmt + clippy + test + audit + ruff + bandit + pip-audit
+  # inline.
+  await-ci:
+    name: wait for ci.yml on this SHA
+    runs-on: ubuntu-latest
+    steps:
+      # Why a shell loop instead of `lewagon/wait-on-check-action`:
+      # the action queries the Checks API immediately on entry and
+      # exits with failure if the named check doesn't already exist.
+      # On a tag-push that fires concurrently with a main-push (the
+      # typical `git push origin main && git push origin v0.x.0`
+      # sequence), there's a 30-60s window where release.yml's
+      # await-ci is running but ci.yml hasn't registered its job
+      # checks yet — race condition, the action loses every time.
+      #
+      # The shell loop below queries the workflow-runs API for
+      # ci.yml on the same SHA. Returns empty until ci.yml fires;
+      # then polls until the run completes; treats `success` and
+      # `skipped` as green; everything else fails the release.
+      - name: Wait for ci.yml workflow on this SHA
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          SHA="${{ github.sha }}"
+          REPO="${{ github.repository }}"
+          DEADLINE=$((SECONDS + 1800))  # 30-min cap
+          echo "Waiting for ci.yml on $SHA..."
+          while [ $SECONDS -lt $DEADLINE ]; do
+            run_json=$(gh api \
+              "repos/$REPO/actions/workflows/ci.yml/runs?head_sha=$SHA&per_page=1" \
+              --jq '.workflow_runs[0] // empty' || true)
+            if [ -z "$run_json" ]; then
+              echo "  no ci.yml run yet for $SHA, retrying in 20s..."
+              sleep 20
+              continue
+            fi
+            status=$(echo "$run_json" | jq -r '.status')
+            conclusion=$(echo "$run_json" | jq -r '.conclusion // ""')
+            run_id=$(echo "$run_json" | jq -r '.id')
+            echo "  ci.yml run $run_id: status=$status conclusion=$conclusion"
+            if [ "$status" = "completed" ]; then
+              case "$conclusion" in
+                success|skipped)
+                  echo "ci.yml passed; proceeding to wheel matrix"
+                  exit 0
+                  ;;
+                *)
+                  echo "ci.yml conclusion=$conclusion — refusing to publish"
+                  exit 1
+                  ;;
+              esac
+            fi
+            sleep 20
+          done
+          echo "timeout waiting for ci.yml on $SHA"
+          exit 1
+
+  build-linux:
+    name: linux-x86_64 wheels (py${{ matrix.python }})
+    needs: await-ci
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: Build wheel (manylinux_2_28)
+        uses: PyO3/maturin-action@v1
+        with:
+          # `manylinux: 2_28` resolves to manylinux_2_28
+          # (AlmaLinux 8 base, gcc 11+, glibc 2.28). Wheels built
+          # here require glibc ≥ 2.28 at runtime: covers Ubuntu
+          # 20.04+, Debian 11+, RHEL/AlmaLinux/Rocky 8+, Fedora 30+.
+          # Older systems (RHEL 7, Ubuntu 18.04) are EOL and
+          # excluded by design.
+          target: x86_64-unknown-linux-gnu
+          manylinux: 2_28
+          # `--release` matches the prod profile.
+          # `--strip` is implied by [tool.maturin] strip = true.
+          args: --release --interpreter python${{ matrix.python }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheels-linux-x86_64-py${{ matrix.python }}
+          path: target/wheels/*.whl
+          if-no-files-found: error
+
+  build-macos:
+    name: macos-${{ matrix.arch }} wheels (py${{ matrix.python }})
+    needs: await-ci
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Apple Silicon: native build on arm64 runner — fastest +
+          # avoids cross-link headaches. Intel Mac wheels are
+          # intentionally not built (sdist fall-through covers
+          # those users).
+          - arch: aarch64
+            runner: macos-14
+            target: aarch64-apple-darwin
+            python: "3.11"
+          - arch: aarch64
+            runner: macos-14
+            target: aarch64-apple-darwin
+            python: "3.12"
+          - arch: aarch64
+            runner: macos-14
+            target: aarch64-apple-darwin
+            python: "3.13"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Build wheel
+        uses: PyO3/maturin-action@v1
+        with:
+          target: ${{ matrix.target }}
+          args: --release --interpreter python${{ matrix.python }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheels-macos-${{ matrix.arch }}-py${{ matrix.python }}
+          path: target/wheels/*.whl
+          if-no-files-found: error
+
+  build-sdist:
+    name: source distribution
+    needs: await-ci
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build sdist
+        uses: PyO3/maturin-action@v1
+        with:
+          # `--out target/wheels` lands the .tar.gz next to the
+          # wheels for the same upload-artifact path glob.
+          command: sdist
+          args: --out target/wheels
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sdist
+          path: target/wheels/*.tar.gz
+          if-no-files-found: error
+
+  publish:
+    name: publish to PyPI
+    # Publish only when the workflow was triggered by a tag push; a
+    # manual workflow_dispatch run still builds + uploads artifacts
+    # to the run summary so you can verify before tagging.
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [build-linux, build-macos, build-sdist]
+    runs-on: ubuntu-latest
+
+    # The `pypi` environment ties this job to the trusted-publisher
+    # record on PyPI.
+    environment:
+      name: pypi
+      url: https://pypi.org/p/ematix-probe
+
+    permissions:
+      # Mandatory for trusted publishing — `pypa/gh-action-pypi-publish`
+      # mints a short-lived token from this OIDC claim.
+      id-token: write
+
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: List artifacts
+        run: ls -la dist/
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          skip-existing: true
