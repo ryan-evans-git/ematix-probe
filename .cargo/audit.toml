@@ -1,0 +1,14 @@
+# cargo-audit configuration.
+#
+# Run with: `cargo audit` (uses this file automatically when present
+# under `.cargo/`).
+#
+# `ignore = [...]` lists advisory IDs the audit will not fail on.
+# Every entry MUST be accompanied by a comment explaining (a) why it
+# can't be patched and (b) why we accept the risk for our use case.
+# Re-evaluate ignores quarterly or whenever a parent dep upgrades.
+#
+# Phase 0: empty list — no transitive advisories yet.
+
+[advisories]
+ignore = []

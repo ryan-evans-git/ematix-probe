@@ -1,0 +1,17 @@
+[package]
+name = "ematix-probe-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "ematix-probe CLI binary."
+
+[[bin]]
+name = "ematix-probe"
+path = "src/main.rs"
+
+[dependencies]
+ematix-probe-core = { workspace = true }
+clap = { workspace = true }
