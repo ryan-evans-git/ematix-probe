@@ -82,6 +82,9 @@ impl DataAdapter for PostgresAdapter {
                 Assertion::Regex { column, pattern } => {
                     self.run_regex(plan, idx, column, pattern).await?
                 }
+                Assertion::Enum { column, allowed } => {
+                    self.run_enum(plan, idx, column, allowed).await?
+                }
             };
             results.push(result);
         }
@@ -275,6 +278,71 @@ impl PostgresAdapter {
                 verdict: Verdict::Fail,
                 message: Some(format!(
                     "column {column:?} has {bad_count} row(s) not matching pattern {pattern:?}"
+                )),
+            })
+        }
+    }
+}
+
+impl PostgresAdapter {
+    /// Pushdown SQL for `Enum`:
+    ///   `SELECT count(*) FROM <t> WHERE <col> NOT IN ($1, $2, ...)`
+    /// Pass at 0; Fail with disallowed-row count otherwise.
+    /// NULL values are not counted: `NULL NOT IN (...)` is NULL,
+    /// which `WHERE` treats as false. Pair with `NotNull` to forbid
+    /// NULLs. Empty `allowed` is rejected as `AdapterError::Config`
+    /// — every non-NULL row would otherwise violate, which is
+    /// almost certainly user error.
+    async fn run_enum(
+        &self,
+        plan: &ProbePlan,
+        idx: usize,
+        column: &str,
+        allowed: &[String],
+    ) -> Result<AssertionResult, AdapterError> {
+        if allowed.is_empty() {
+            return Err(AdapterError::Config(format!(
+                "enum assertion on column {column:?} has empty `allowed` set"
+            )));
+        }
+
+        let table = qualified_table(plan.schema.as_deref(), &plan.table);
+        let col = quote_ident(column);
+        let placeholders = (1..=allowed.len())
+            .map(|i| format!("${i}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let sql = format!("SELECT count(*) FROM {table} WHERE {col} NOT IN ({placeholders})");
+
+        let params: Vec<&(dyn tokio_postgres::types::ToSql + Sync)> = allowed
+            .iter()
+            .map(|s| s as &(dyn tokio_postgres::types::ToSql + Sync))
+            .collect();
+
+        let client = self
+            .pool
+            .get()
+            .await
+            .map_err(|e| AdapterError::Connection(format!("acquire failed: {e}")))?;
+        let row = client
+            .query_one(&sql, &params)
+            .await
+            .map_err(|e| AdapterError::Query(format!("enum query failed: {e}")))?;
+        let bad_count: i64 = row.get(0);
+
+        if bad_count == 0 {
+            Ok(AssertionResult {
+                assertion_index: idx,
+                verdict: Verdict::Pass,
+                message: None,
+            })
+        } else {
+            Ok(AssertionResult {
+                assertion_index: idx,
+                verdict: Verdict::Fail,
+                message: Some(format!(
+                    "column {column:?} has {bad_count} row(s) outside allowed set ({} value(s))",
+                    allowed.len()
                 )),
             })
         }
