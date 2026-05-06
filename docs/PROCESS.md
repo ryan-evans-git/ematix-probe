@@ -117,7 +117,42 @@ either:
 
 Silent drift is the failure mode this whole process exists to prevent.
 
-## 8. Sprint file template
+## 8. Project-specific gotchas
+
+These are rules the retros surfaced — keep them load-bearing here so
+they don't have to be re-learned every sprint.
+
+- **Always `cd /Users/ryanevans/RustroverProjects/ematix-probe &&`
+  before any cargo / maturin / pytest command in shell.** The
+  Claude Code session is anchored at `ematix-flow` (its primary
+  working directory); without an explicit `cd`, shell commands
+  silently operate on the wrong workspace. Tool calls like
+  `Read` / `Write` / `Edit` use absolute paths and are unaffected.
+
+- **Use `set -o pipefail` in CI gate sweeps** so failures behind
+  `2>&1 | tail -N` don't get masked. `set -e` alone reports the
+  exit status of the last command in a pipe (usually `tail`,
+  always 0).
+
+- **When adding a Python dev-dep**, update three places in the same
+  commit: `pyproject.toml [project.optional-dependencies] dev`,
+  `.github/workflows/ci.yml` `pip install` line, and (if the test
+  needs it at runtime in a fresh container) any test-helper imports.
+  Local venvs accumulate ad-hoc installs that mask CI gaps.
+
+- **PyO3 `extension-module` feature** is gated per-crate in this
+  workspace, not in the workspace `pyo3` dep. `cargo test
+  --workspace` would otherwise fail to link a missing libpython
+  for the `_core` cdylib's test binary. Maturin enables the
+  feature via `[tool.maturin] features =
+  ["ematix-probe-py/extension-module"]`.
+
+- **`cargo audit` advisories** must be either fixed or
+  documented in BOTH `.cargo/audit.toml` AND `SECURITY.md`'s
+  accepted-advisories table. Re-evaluate quarterly. Don't
+  suppress without the paper trail.
+
+## 9. Sprint file template
 
 ```markdown
 # Sprint NN — <one-line title>

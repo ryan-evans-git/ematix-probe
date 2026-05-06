@@ -1,9 +1,9 @@
 # Sprint 2 — Phase 1a: Postgres data probe MVP
 
-Dates: 2026-05-06 → 2026-05-13
+Dates: 2026-05-06 → 2026-05-06 *(closed same-day; second sprint to fit in a single session)*
 PI: PI-1
 Phase: Phase 1a
-Status: **active**
+Status: **closed**
 
 ## Goal
 
@@ -16,8 +16,9 @@ no `regex` / `enum` / `row_count` / `freshness` (Phase 1b too).
 ## Stories
 
 Each story RED → GREEN → REFACTOR per [PROCESS.md §5](../PROCESS.md).
+**All 8 stories shipped, every one RED-first.**
 
-- [ ] **S-2.1 — `ProbePlan` + `Verdict` types in core**
+- [x] **S-2.1 — `ProbePlan` + `Verdict` types in core**
   - RED: `crates/ematix-probe-core/src/lib.rs` test
     `empty_plan_evaluates_pass` builds a `ProbePlan` with no
     assertions, runs it through a stub adapter, asserts the
@@ -29,7 +30,7 @@ Each story RED → GREEN → REFACTOR per [PROCESS.md §5](../PROCESS.md).
   - REFACTOR: split into `engine::data` + `adapters::data` modules
     matching PRD §8.1.
 
-- [ ] **S-2.2 — Postgres adapter (`tokio-postgres` + `deadpool-postgres`)**
+- [x] **S-2.2 — Postgres adapter (`tokio-postgres` + `deadpool-postgres`)**
   - RED: integration test in `crates/ematix-probe-core/tests/postgres_adapter.rs`
     that uses `testcontainers` to spin up Postgres, opens a pooled
     connection through the adapter, runs `SELECT 1`. Fails (no
@@ -40,7 +41,7 @@ Each story RED → GREEN → REFACTOR per [PROCESS.md §5](../PROCESS.md).
   - REFACTOR: factor URL parsing into `source::postgres(url)` in
     Phase 1b when the Python factory lands.
 
-- [ ] **S-2.3 — `not_null` assertion (pushdown SQL)**
+- [x] **S-2.3 — `not_null` assertion (pushdown SQL)**
   - RED: integration test asserts that a table with one NULL row in
     column `email` produces `Verdict::Fail` with a meaningful
     `AssertionResult` (column = "email", failed_rows = 1, total = N).
@@ -50,7 +51,7 @@ Each story RED → GREEN → REFACTOR per [PROCESS.md §5](../PROCESS.md).
     fail when count > 0.
   - REFACTOR: identifier-quoting helper (Postgres uses `"`).
 
-- [ ] **S-2.4 — `unique` assertion (pushdown SQL)**
+- [x] **S-2.4 — `unique` assertion (pushdown SQL)**
   - RED: integration test with two rows sharing the same value in a
     `customer_id` column → `Verdict::Fail`. Test against a clean
     table → `Verdict::Pass`.
@@ -58,7 +59,7 @@ Each story RED → GREEN → REFACTOR per [PROCESS.md §5](../PROCESS.md).
     `SELECT count(*) FROM (SELECT "col", count(*) c FROM "schema"."table" GROUP BY "col" HAVING count(*) > 1) d`.
   - REFACTOR: assertion-result struct shared with S-2.3.
 
-- [ ] **S-2.5 — `between` assertion (numeric inclusive range)**
+- [x] **S-2.5 — `between` assertion (numeric inclusive range)**
   - RED: integration test with row outside `[0, 120]` in `age`
     column → `Verdict::Fail`. Test with all-in-range rows →
     `Verdict::Pass`.
@@ -69,7 +70,7 @@ Each story RED → GREEN → REFACTOR per [PROCESS.md §5](../PROCESS.md).
   - REFACTOR: extract a common `count_violations_sql` helper if
     natural; resist if it's a premature abstraction.
 
-- [ ] **S-2.6 — Python `@probe.data` decorator + fluent builder**
+- [x] **S-2.6 — Python `@probe.data` decorator + fluent builder**
   - RED: pytest in `tests/test_probe_data.py` builds:
     ```python
     @probe.data(source=source.postgres("DATABASE_URL"), table="users")
@@ -85,7 +86,7 @@ Each story RED → GREEN → REFACTOR per [PROCESS.md §5](../PROCESS.md).
     builder in `python/ematix_probe/probe.py` and `source.py`.
   - REFACTOR: type stubs (`.pyi`) deferred to Phase 1b.
 
-- [ ] **S-2.7 — End-to-end pytest using testcontainers**
+- [x] **S-2.7 — End-to-end pytest using testcontainers**
   - RED: `tests/test_e2e_postgres.py` uses
     `testcontainers[postgres]` to spin Postgres, seeds a small
     table, runs the `@probe.data`-decorated probe, asserts the
@@ -96,7 +97,7 @@ Each story RED → GREEN → REFACTOR per [PROCESS.md §5](../PROCESS.md).
   - REFACTOR: split unit-only fast tests from
     Postgres-requiring integration tests via pytest markers.
 
-- [ ] **S-2.8 — Update CHANGELOG, sprint, learnings**
+- [x] **S-2.8 — Update CHANGELOG, sprint, learnings**
   - Add Phase 1a entry to [CHANGELOG.md](../../CHANGELOG.md).
   - Update [LEARNINGS.md](../LEARNINGS.md) with anything surprising
     about pyo3 cross-language type design or pushdown-SQL edge cases.
@@ -137,19 +138,72 @@ Each story RED → GREEN → REFACTOR per [PROCESS.md §5](../PROCESS.md).
    words). Mitigation: always quote with `"`, escape embedded `"` by
    doubling. Test with a column named `"select"`.
 
-## Retro (filled at sprint close)
+## Retro (closed 2026-05-06)
 
 ### Kept
--
+- **RED-first commits per story**, even when GREEN was minutes
+  away. The commit log is now an audit trail showing each test
+  failed for the right reason before the implementation landed.
+  Reviewers and future-me can rebuild the reasoning.
+- **One PR per sprint**, opened as draft early so CI runs every
+  push. Eight stories landed across ~12 commits on `phase-1a`;
+  the draft PR caught the missing `psycopg2-binary` install in
+  CI before merge.
+- **Mirroring ematix-flow's CICD foundation early.** The
+  `audit-rust` job caught the `tokio-tar` advisory the moment
+  testcontainers landed; cataloguing it in `.cargo/audit.toml`
+  + `SECURITY.md` was a 5-minute exercise instead of an end-of-
+  sprint surprise.
+- **`testcontainers` on both sides of the boundary.** Rust
+  integration tests used Rust testcontainers; Python e2e tests
+  used Python testcontainers. Both pulled the same Docker image
+  on first use and ran fast (1-2s container start on M3 Pro).
 
 ### Improved
--
+- **Local CI mirroring.** I ran the gate sweep locally before
+  every push, but missed the CI-only `psycopg2-binary` install
+  because my local venv had it. Going forward: when a new dep
+  goes into local venv, also check it's added to BOTH
+  `pyproject.toml [project.optional-dependencies] dev` AND
+  `.github/workflows/ci.yml` install line in the same commit.
+- **CWD anchoring still bites.** Two more times this sprint I
+  ran `cargo` commands without `cd /Users/.../ematix-probe &&`
+  and the harness operated on ematix-flow. Adding it to
+  PROCESS.md as a project rule next sprint.
+- **Commit messages with backticks + zsh + heredoc** can produce
+  silently mangled output (one accidental empty `unknown` file
+  got committed and had to be amended away). Going forward: avoid
+  unbalanced backticks in heredoc commit bodies, or use
+  alternative quoting.
 
 ### Dropped
--
+- **Premature abstraction urge.** Resisted extracting a SQL-
+  builder module across S-2.3..S-2.5 — three pushdown queries
+  share patterns but the right shape isn't obvious yet. Phase 1b
+  adds 4 more assertion handlers; that's when the pattern can
+  emerge naturally.
+- **Reflex of writing whole code before tests.** The TDD
+  cadence is now muscle memory. Stop questioning it.
 
 ### Learned
--
+- pyo3 0.28 API churn (logged): `allow_threads` → `detach`;
+  `#[pyclass]` + `Clone` needs `from_py_object` opt-in.
+- Postgres parameter type inference (logged): cast the
+  placeholder `$1::float8`, not the column.
+- `cargo audit` doesn't distinguish dev-only deps (logged):
+  always document the paper trail before suppressing.
+- **Sprint velocity:** Phase 1a took ~3-4 focused hours (one
+  long session). PI-1 dates remain loose — we're 2/10 sprints in,
+  ~0/70 days elapsed. v0.1 PyPI is plausibly weeks not months
+  if velocity holds.
+- **Solo + AI-assisted = `set -o pipefail`** is non-negotiable.
+  Adding it to every gate sweep saves at least one false-positive
+  per sprint.
 
 ### Drift?
--
+- **No PRD drift.** Decorator surface lands exactly per §6.1.
+- **No PI plan drift.** Phase 1a stories all match what shipped.
+- **Minor schedule drift** (positive): Sprint 2 closed in 1 day
+  vs. planned 7. Not re-baselining yet — Phase 1a was a known
+  fast-shipping vertical slice (3 SQL handlers + boilerplate).
+  Phase 1b (4 more assertion types) is the next data point.
