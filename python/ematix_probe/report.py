@@ -17,11 +17,12 @@ unit-tested without spinning up Postgres (see
 
 from __future__ import annotations
 
+import json
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 Verdict = Literal["pass", "fail", "error"]
 
@@ -125,3 +126,32 @@ class RunReport:
         # cost is one O(n) walk after assembly.
         ET.indent(tree, space="  ")
         tree.write(Path(path), encoding="utf-8", xml_declaration=True)
+
+    def to_dict(self) -> dict[str, Any]:
+        """The JSON-shaped representation. Pulled out of write_json
+        so downstream code can ``json.dumps(report.to_dict())``
+        directly without an intermediate file."""
+        return {
+            "probe_name": self.probe_name,
+            "table": self.table,
+            "schema": self.schema,
+            "verdict": self.verdict,
+            "started_at": self.started_at.isoformat(),
+            "finished_at": self.finished_at.isoformat(),
+            "duration_seconds": self.duration_seconds,
+            "assertions": [
+                {
+                    "assertion_index": a.assertion_index,
+                    "name": a.name or f"assertion_{a.assertion_index}",
+                    "verdict": a.verdict,
+                    "message": a.message,
+                }
+                for a in self.assertions
+            ],
+        }
+
+    def write_json(self, path: str | Path) -> None:
+        """Serialize this report as JSON at ``path``. Schema is
+        documented in this module's docstring and stable for v0.1
+        consumers."""
+        Path(path).write_text(json.dumps(self.to_dict(), indent=2) + "\n")
