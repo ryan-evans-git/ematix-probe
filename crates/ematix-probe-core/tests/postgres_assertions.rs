@@ -169,3 +169,68 @@ async fn unique_fails_when_duplicates_present() {
         "message should mention the count of dup values (2), got: {msg:?}"
     );
 }
+
+#[tokio::test]
+async fn between_passes_when_all_in_range() {
+    let (_pg, url) = postgres().await;
+
+    let client = raw_client(&url).await;
+    client
+        .batch_execute(
+            "CREATE TABLE people (id SERIAL PRIMARY KEY, age INT);
+             -- include both endpoints of [0, 120] to lock in inclusive semantics
+             INSERT INTO people (age) VALUES (0), (5), (35), (120);",
+        )
+        .await
+        .expect("setup");
+
+    let adapter = PostgresAdapter::connect(&url).await.expect("adapter");
+    let plan = ProbePlan {
+        schema: None,
+        table: "people".to_string(),
+        assertions: vec![Assertion::Between {
+            column: "age".to_string(),
+            low: 0.0,
+            high: 120.0,
+        }],
+    };
+    let summary = adapter.execute(&plan).await.expect("execute");
+    assert_eq!(summary.verdict, Verdict::Pass);
+}
+
+#[tokio::test]
+async fn between_fails_when_values_out_of_range() {
+    let (_pg, url) = postgres().await;
+
+    let client = raw_client(&url).await;
+    client
+        .batch_execute(
+            "CREATE TABLE people (id SERIAL PRIMARY KEY, age INT);
+             -- two violations: -1 below low, 200 above high
+             INSERT INTO people (age) VALUES (5), (-1), (10), (200), (35);",
+        )
+        .await
+        .expect("setup");
+
+    let adapter = PostgresAdapter::connect(&url).await.expect("adapter");
+    let plan = ProbePlan {
+        schema: None,
+        table: "people".to_string(),
+        assertions: vec![Assertion::Between {
+            column: "age".to_string(),
+            low: 0.0,
+            high: 120.0,
+        }],
+    };
+    let summary = adapter.execute(&plan).await.expect("execute");
+    assert_eq!(summary.verdict, Verdict::Fail);
+    let msg = summary.assertions[0]
+        .message
+        .as_ref()
+        .expect("message present on fail");
+    assert!(msg.contains("age"), "message: {msg:?}");
+    assert!(
+        msg.contains('2'),
+        "message should report 2 out-of-range rows, got: {msg:?}"
+    );
+}

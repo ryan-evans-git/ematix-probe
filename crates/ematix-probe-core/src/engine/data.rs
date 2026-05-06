@@ -33,6 +33,15 @@ pub enum Assertion {
     /// don't violate uniqueness — pair with `NotNull` to forbid
     /// them.)
     Unique { column: String },
+    /// All non-NULL values in `column` must lie within the
+    /// inclusive range `[low, high]`. NULL values are *not*
+    /// counted as violations (SQL `NULL < x` is unknown); pair
+    /// with `NotNull` to forbid them too.
+    Between {
+        column: String,
+        low: f64,
+        high: f64,
+    },
 }
 
 /// A complete probe execution plan: which table to probe + the
