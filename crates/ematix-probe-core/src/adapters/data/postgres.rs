@@ -85,6 +85,9 @@ impl DataAdapter for PostgresAdapter {
                 Assertion::Enum { column, allowed } => {
                     self.run_enum(plan, idx, column, allowed).await?
                 }
+                Assertion::RowCount { low, high } => {
+                    self.run_row_count(plan, idx, *low, *high).await?
+                }
             };
             results.push(result);
         }
@@ -343,6 +346,65 @@ impl PostgresAdapter {
                 message: Some(format!(
                     "column {column:?} has {bad_count} row(s) outside allowed set ({} value(s))",
                     allowed.len()
+                )),
+            })
+        }
+    }
+
+    /// Pushdown SQL for `RowCount` (table-level):
+    ///   `SELECT count(*) FROM <t>`
+    /// Then compare against the bounds in Rust. Both bounds `None`
+    /// is rejected as `AdapterError::Config` (asserts nothing).
+    /// `low: Some(n)` is "at least n"; `high: Some(n)` is "at most n".
+    async fn run_row_count(
+        &self,
+        plan: &ProbePlan,
+        idx: usize,
+        low: Option<i64>,
+        high: Option<i64>,
+    ) -> Result<AssertionResult, AdapterError> {
+        if low.is_none() && high.is_none() {
+            return Err(AdapterError::Config(
+                "row_count assertion requires at least one of `low` or `high`".to_string(),
+            ));
+        }
+
+        let table = qualified_table(plan.schema.as_deref(), &plan.table);
+        let sql = format!("SELECT count(*) FROM {table}");
+
+        let client = self
+            .pool
+            .get()
+            .await
+            .map_err(|e| AdapterError::Connection(format!("acquire failed: {e}")))?;
+        let row = client
+            .query_one(&sql, &[])
+            .await
+            .map_err(|e| AdapterError::Query(format!("row_count query failed: {e}")))?;
+        let count: i64 = row.get(0);
+
+        let too_low = low.map(|lo| count < lo).unwrap_or(false);
+        let too_high = high.map(|hi| count > hi).unwrap_or(false);
+
+        if !too_low && !too_high {
+            Ok(AssertionResult {
+                assertion_index: idx,
+                verdict: Verdict::Pass,
+                message: None,
+            })
+        } else {
+            let bound_desc = match (low, high) {
+                (Some(lo), Some(hi)) => format!("[{lo}, {hi}]"),
+                (Some(lo), None) => format!(">= {lo}"),
+                (None, Some(hi)) => format!("<= {hi}"),
+                (None, None) => unreachable!("guarded above"),
+            };
+            Ok(AssertionResult {
+                assertion_index: idx,
+                verdict: Verdict::Fail,
+                message: Some(format!(
+                    "table {:?} has {count} row(s); expected {bound_desc}",
+                    plan.table
                 )),
             })
         }
