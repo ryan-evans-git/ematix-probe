@@ -20,10 +20,7 @@ async fn postgres_adapter_connects_and_validates() {
         .await
         .expect("postgres container failed to start");
     let host = pg.get_host().await.expect("host");
-    let port = pg
-        .get_host_port_ipv4(5432)
-        .await
-        .expect("mapped 5432 port");
+    let port = pg.get_host_port_ipv4(5432).await.expect("mapped 5432 port");
 
     let url = format!("postgres://postgres:postgres@{host}:{port}/postgres");
     let adapter = PostgresAdapter::connect(&url)
@@ -48,8 +45,5 @@ async fn postgres_adapter_connect_with_invalid_url_errors() {
     let result =
         PostgresAdapter::connect("postgres://nobody:wrong@localhost:1/nope_definitely_no_db_here")
             .await;
-    assert!(
-        result.is_err(),
-        "expected Err for unreachable host, got Ok"
-    );
+    assert!(result.is_err(), "expected Err for unreachable host, got Ok");
 }

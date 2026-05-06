@@ -44,6 +44,23 @@ libpython → green.
 
 Apply this pattern to every future PyO3-bound crate.
 
+## 2026-05-06 — Dev-only deps still trigger `cargo audit` advisories `rust` `tooling` `ci`
+
+Adding `testcontainers-modules` as a `[dev-dependencies]` pulled in
+`tokio-tar 0.3.1` (RUSTSEC-2025-0111, file-smuggling via PAX
+headers, no fix available) and `rustls-pemfile 2.2.0` (unmaintained
+warning, not blocking).
+
+`cargo audit` doesn't distinguish dev-deps from runtime deps —
+anything in `Cargo.lock` is fair game. So even a strictly dev-only
+test infra triggers CI-fail-by-default.
+
+Pattern for accepting these: edit `.cargo/audit.toml` `ignore = [...]`
+and document the (a) why-can't-fix and (b) risk-assessment in the
+inline comment AND in SECURITY.md's "Known accepted advisories"
+table. **Don't suppress without that paper trail** — quarterly
+re-audit cycles depend on it.
+
 ## 2026-05-06 — Sprint 1 retro: a 1-week sprint can close in 1 day `process`
 
 Phase 0 was scoped for a 1-week sprint and shipped same-day. Two

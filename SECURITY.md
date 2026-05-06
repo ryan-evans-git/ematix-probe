@@ -36,9 +36,14 @@ quarterly or on any upstream upgrade that might unblock a fix.
 
 ### Rust — `.cargo/audit.toml`
 
-*None as of v0.1 Phase 0.* Add entries with rationale in the
-`.cargo/audit.toml` `[advisories] ignore` array as transitive
-advisories surface.
+| Advisory | Crate | Source | Why ignored |
+|---|---|---|---|
+| RUSTSEC-2025-0111 | `tokio-tar 0.3.1` | `testcontainers 0.23.3` (transitive, dev-deps only) | PAX-header parsing file-smuggling flaw. **Never reaches the published wheel** — `testcontainers` is `[dev-dependencies]`, used only for Postgres integration tests in CI. The vulnerability triggers when *parsing* a hostile tar archive; testcontainers only *creates* archives from operator-controlled files. Re-audit on every testcontainers / tokio-tar bump. |
+
+The `rustls-pemfile 2.2.0` *unmaintained* warning is informational
+(cargo audit does not fail CI on it). It reaches us via
+`testcontainers → bollard → rustls-pemfile`. We don't suppress it
+explicitly so future maintenance status remains visible.
 
 ### Python — `pyproject.toml [tool.bandit]`
 
