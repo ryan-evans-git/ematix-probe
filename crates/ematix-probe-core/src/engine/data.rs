@@ -20,13 +20,14 @@ pub enum Verdict {
 
 /// Declarative description of one column- or table-level check the
 /// engine should perform. Variants land per sprint:
-/// `NotNull` / `Unique` / `Between` in S-2.3..S-2.5;
+/// `NotNull` (S-2.3); `Unique` (S-2.4); `Between` (S-2.5);
 /// `Regex` / `Enum` / `RowCount` / `Freshness` in Phase 1b;
 /// distribution checks in Phase 3.
 #[derive(Debug, Clone, PartialEq)]
 #[non_exhaustive]
 pub enum Assertion {
-    // Populated in S-2.3..S-2.5.
+    /// `column IS NULL` count must be zero.
+    NotNull { column: String },
 }
 
 /// A complete probe execution plan: which table to probe + the
