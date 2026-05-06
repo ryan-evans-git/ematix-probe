@@ -38,6 +38,37 @@ pub enum Assertion {
     /// counted as violations (SQL `NULL < x` is unknown); pair
     /// with `NotNull` to forbid them too.
     Between { column: String, low: f64, high: f64 },
+    /// All non-NULL values in `column` must match the POSIX regex
+    /// `pattern` (Postgres `~` operator). NULL values are *not*
+    /// counted as violations; pair with `NotNull` to forbid them.
+    /// `pattern` is the POSIX regex string as accepted by Postgres;
+    /// it is *not* a Python `re` pattern, though most common
+    /// character-class syntax overlaps.
+    Regex { column: String, pattern: String },
+    /// All non-NULL values in `column` must appear in `allowed`.
+    /// NULL values are *not* counted as violations (`NULL NOT IN
+    /// (...)` is NULL, which `WHERE` treats as false); pair with
+    /// `NotNull` to forbid them. Empty `allowed` is rejected at
+    /// adapter time (every non-NULL row would violate, which is
+    /// almost certainly user error).
+    Enum {
+        column: String,
+        allowed: Vec<String>,
+    },
+    /// Table-level: `count(*)` must lie within `[low, high]`,
+    /// where either bound may be `None` to denote "unbounded on
+    /// that side". `low: Some(n)` is "at least n"; `high: Some(n)`
+    /// is "at most n". Both `None` is rejected at adapter time
+    /// (asserts nothing).
+    RowCount { low: Option<i64>, high: Option<i64> },
+    /// Table-level: the most recent value of `column` must be no
+    /// older than `within_seconds`. Adapter computes
+    /// `now() - MAX(<column>)` and fails when the gap exceeds the
+    /// threshold. Empty tables fail (no data → no freshness
+    /// signal). Negative `within_seconds` is rejected at adapter
+    /// time. The Python side parses duration strings like
+    /// `"24h"` / `"6h"` / `"30m"` into seconds.
+    Freshness { column: String, within_seconds: i64 },
 }
 
 /// A complete probe execution plan: which table to probe + the

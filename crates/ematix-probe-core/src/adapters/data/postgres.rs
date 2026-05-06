@@ -79,6 +79,22 @@ impl DataAdapter for PostgresAdapter {
                 Assertion::Between { column, low, high } => {
                     self.run_between(plan, idx, column, *low, *high).await?
                 }
+                Assertion::Regex { column, pattern } => {
+                    self.run_regex(plan, idx, column, pattern).await?
+                }
+                Assertion::Enum { column, allowed } => {
+                    self.run_enum(plan, idx, column, allowed).await?
+                }
+                Assertion::RowCount { low, high } => {
+                    self.run_row_count(plan, idx, *low, *high).await?
+                }
+                Assertion::Freshness {
+                    column,
+                    within_seconds,
+                } => {
+                    self.run_freshness(plan, idx, column, *within_seconds)
+                        .await?
+                }
             };
             results.push(result);
         }
@@ -228,6 +244,246 @@ impl PostgresAdapter {
                     "column {column:?} has {oor_count} row(s) outside [{low}, {high}]"
                 )),
             })
+        }
+    }
+}
+
+impl PostgresAdapter {
+    /// Pushdown SQL for `Regex` (Postgres POSIX `!~`):
+    ///   `SELECT count(*) FROM <t> WHERE <col> !~ $1`
+    /// Pass at 0; Fail with non-matching row count otherwise.
+    /// NULL values are not counted: `NULL !~ pat` is NULL, which
+    /// `WHERE` treats as false. Pair with `NotNull` to forbid NULLs.
+    async fn run_regex(
+        &self,
+        plan: &ProbePlan,
+        idx: usize,
+        column: &str,
+        pattern: &str,
+    ) -> Result<AssertionResult, AdapterError> {
+        let table = qualified_table(plan.schema.as_deref(), &plan.table);
+        let col = quote_ident(column);
+        let sql = format!("SELECT count(*) FROM {table} WHERE {col} !~ $1");
+
+        let client = self
+            .pool
+            .get()
+            .await
+            .map_err(|e| AdapterError::Connection(format!("acquire failed: {e}")))?;
+        let row = client
+            .query_one(&sql, &[&pattern])
+            .await
+            .map_err(|e| AdapterError::Query(format!("regex query failed: {e}")))?;
+        let bad_count: i64 = row.get(0);
+
+        if bad_count == 0 {
+            Ok(AssertionResult {
+                assertion_index: idx,
+                verdict: Verdict::Pass,
+                message: None,
+            })
+        } else {
+            Ok(AssertionResult {
+                assertion_index: idx,
+                verdict: Verdict::Fail,
+                message: Some(format!(
+                    "column {column:?} has {bad_count} row(s) not matching pattern {pattern:?}"
+                )),
+            })
+        }
+    }
+}
+
+impl PostgresAdapter {
+    /// Pushdown SQL for `Enum`:
+    ///   `SELECT count(*) FROM <t> WHERE <col> NOT IN ($1, $2, ...)`
+    /// Pass at 0; Fail with disallowed-row count otherwise.
+    /// NULL values are not counted: `NULL NOT IN (...)` is NULL,
+    /// which `WHERE` treats as false. Pair with `NotNull` to forbid
+    /// NULLs. Empty `allowed` is rejected as `AdapterError::Config`
+    /// — every non-NULL row would otherwise violate, which is
+    /// almost certainly user error.
+    async fn run_enum(
+        &self,
+        plan: &ProbePlan,
+        idx: usize,
+        column: &str,
+        allowed: &[String],
+    ) -> Result<AssertionResult, AdapterError> {
+        if allowed.is_empty() {
+            return Err(AdapterError::Config(format!(
+                "enum assertion on column {column:?} has empty `allowed` set"
+            )));
+        }
+
+        let table = qualified_table(plan.schema.as_deref(), &plan.table);
+        let col = quote_ident(column);
+        let placeholders = (1..=allowed.len())
+            .map(|i| format!("${i}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let sql = format!("SELECT count(*) FROM {table} WHERE {col} NOT IN ({placeholders})");
+
+        let params: Vec<&(dyn tokio_postgres::types::ToSql + Sync)> = allowed
+            .iter()
+            .map(|s| s as &(dyn tokio_postgres::types::ToSql + Sync))
+            .collect();
+
+        let client = self
+            .pool
+            .get()
+            .await
+            .map_err(|e| AdapterError::Connection(format!("acquire failed: {e}")))?;
+        let row = client
+            .query_one(&sql, &params)
+            .await
+            .map_err(|e| AdapterError::Query(format!("enum query failed: {e}")))?;
+        let bad_count: i64 = row.get(0);
+
+        if bad_count == 0 {
+            Ok(AssertionResult {
+                assertion_index: idx,
+                verdict: Verdict::Pass,
+                message: None,
+            })
+        } else {
+            Ok(AssertionResult {
+                assertion_index: idx,
+                verdict: Verdict::Fail,
+                message: Some(format!(
+                    "column {column:?} has {bad_count} row(s) outside allowed set ({} value(s))",
+                    allowed.len()
+                )),
+            })
+        }
+    }
+
+    /// Pushdown SQL for `RowCount` (table-level):
+    ///   `SELECT count(*) FROM <t>`
+    /// Then compare against the bounds in Rust. Both bounds `None`
+    /// is rejected as `AdapterError::Config` (asserts nothing).
+    /// `low: Some(n)` is "at least n"; `high: Some(n)` is "at most n".
+    async fn run_row_count(
+        &self,
+        plan: &ProbePlan,
+        idx: usize,
+        low: Option<i64>,
+        high: Option<i64>,
+    ) -> Result<AssertionResult, AdapterError> {
+        if low.is_none() && high.is_none() {
+            return Err(AdapterError::Config(
+                "row_count assertion requires at least one of `low` or `high`".to_string(),
+            ));
+        }
+
+        let table = qualified_table(plan.schema.as_deref(), &plan.table);
+        let sql = format!("SELECT count(*) FROM {table}");
+
+        let client = self
+            .pool
+            .get()
+            .await
+            .map_err(|e| AdapterError::Connection(format!("acquire failed: {e}")))?;
+        let row = client
+            .query_one(&sql, &[])
+            .await
+            .map_err(|e| AdapterError::Query(format!("row_count query failed: {e}")))?;
+        let count: i64 = row.get(0);
+
+        let too_low = low.map(|lo| count < lo).unwrap_or(false);
+        let too_high = high.map(|hi| count > hi).unwrap_or(false);
+
+        if !too_low && !too_high {
+            Ok(AssertionResult {
+                assertion_index: idx,
+                verdict: Verdict::Pass,
+                message: None,
+            })
+        } else {
+            let bound_desc = match (low, high) {
+                (Some(lo), Some(hi)) => format!("[{lo}, {hi}]"),
+                (Some(lo), None) => format!(">= {lo}"),
+                (None, Some(hi)) => format!("<= {hi}"),
+                (None, None) => unreachable!("guarded above"),
+            };
+            Ok(AssertionResult {
+                assertion_index: idx,
+                verdict: Verdict::Fail,
+                message: Some(format!(
+                    "table {:?} has {count} row(s); expected {bound_desc}",
+                    plan.table
+                )),
+            })
+        }
+    }
+
+    /// Pushdown SQL for `Freshness` (table-level):
+    ///   `SELECT EXTRACT(EPOCH FROM (now() - MAX(<col>))) FROM <t>`
+    /// The `EXTRACT(EPOCH FROM <interval>)` returns the gap in
+    /// seconds as `double precision`. NULL when the table is empty
+    /// (MAX of nothing is NULL → interval is NULL → extract is NULL),
+    /// which we treat as Fail-with-no-rows: an empty table provides
+    /// no freshness signal, so the data-quality verdict is Fail
+    /// rather than Error (Error would imply we couldn't evaluate
+    /// the check, but we did — there's just nothing to be fresh).
+    /// Negative `within_seconds` is rejected as
+    /// `AdapterError::Config`.
+    async fn run_freshness(
+        &self,
+        plan: &ProbePlan,
+        idx: usize,
+        column: &str,
+        within_seconds: i64,
+    ) -> Result<AssertionResult, AdapterError> {
+        if within_seconds < 0 {
+            return Err(AdapterError::Config(format!(
+                "freshness assertion on column {column:?} has negative within_seconds ({within_seconds})"
+            )));
+        }
+
+        let table = qualified_table(plan.schema.as_deref(), &plan.table);
+        let col = quote_ident(column);
+        // Cast to double precision: in PG 14+ EXTRACT returns
+        // `numeric`, which tokio-postgres can't deserialize to f64
+        // without the rust_decimal feature. PG <14 returned float8
+        // already; the cast is a no-op there.
+        let sql = format!(
+            "SELECT EXTRACT(EPOCH FROM (now() - MAX({col})))::double precision FROM {table}"
+        );
+
+        let client = self
+            .pool
+            .get()
+            .await
+            .map_err(|e| AdapterError::Connection(format!("acquire failed: {e}")))?;
+        let row = client
+            .query_one(&sql, &[])
+            .await
+            .map_err(|e| AdapterError::Query(format!("freshness query failed: {e}")))?;
+        let age_seconds: Option<f64> = row.get(0);
+
+        match age_seconds {
+            None => Ok(AssertionResult {
+                assertion_index: idx,
+                verdict: Verdict::Fail,
+                message: Some(format!(
+                    "table {:?} has no rows; cannot evaluate freshness on column {column:?}",
+                    plan.table
+                )),
+            }),
+            Some(age) if age <= within_seconds as f64 => Ok(AssertionResult {
+                assertion_index: idx,
+                verdict: Verdict::Pass,
+                message: None,
+            }),
+            Some(age) => Ok(AssertionResult {
+                assertion_index: idx,
+                verdict: Verdict::Fail,
+                message: Some(format!(
+                    "column {column:?}: most recent value is {age:.0}s old; \
+                     expected within {within_seconds}s"
+                )),
+            }),
         }
     }
 }

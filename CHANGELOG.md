@@ -7,6 +7,58 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Added — Phase 1b (Sprint 3, PI-1)
+
+- **Extended assertion vocabulary**: `regex`, `enum`, `row_count`,
+  `freshness`. Each pushes down a single `count(*)` (or `MAX(col)`
+  for freshness) so the wire returns one row per check regardless
+  of table size.
+  - `Assertion::Regex { column, pattern }` — Postgres POSIX
+    `<col> !~ $1`. NULL-safe: NULLs are not counted as violations
+    (pair with `not_null` to forbid).
+  - `Assertion::Enum { column, allowed }` — variable-arity
+    `<col> NOT IN ($1, $2, ...)`. Empty `allowed` rejected as
+    `AdapterError::Config`.
+  - `Assertion::RowCount { low, high }` — `Option<i64>` bounds;
+    both `None` rejected as `Config` (asserts nothing).
+  - `Assertion::Freshness { column, within_seconds }` —
+    `EXTRACT(EPOCH FROM (now() - MAX(<col>)))::double precision`.
+    Empty table → `Fail` (no signal); negative `within_seconds`
+    → `Config`. Cast keeps the result f64-deserializable across
+    PG 11..PG 16+.
+- **Python builders** for all 7 assertions:
+  `t.column(...).regex(p)`, `.is_in([...])`, plus table-level
+  `t.row_count(at_least=, at_most=)` and `t.freshness(col,
+  within="24h")`. Duration grammar is `<int><unit>` where
+  `unit ∈ {s, m, h, d}`; lives in `python/ematix_probe/duration.py`.
+- **Machine-readable reports** (`python/ematix_probe/report.py`):
+  - `RunReport.write_junit(path)` — GitHub-Actions-compatible
+    JUnit XML; one `<testsuite>` per probe, one `<testcase>` per
+    assertion, `<failure>` on Fail / `<error>` on Error.
+  - `RunReport.write_json(path)` — stable JSON schema documented
+    in `tests/test_json_report.py`.
+  - `DataProbe.run()` now returns a Python `RunReport` wrapping
+    the pyo3 result with probe name / table / schema / timestamps
+    / per-assertion human names.
+- **End-to-end example** (`examples/quickstart/`): runnable script
+  + README that boots a Postgres testcontainer, seeds intentional
+  violations, runs all 7 assertions, writes JUnit + JSON, and
+  shows the GitHub Actions reporter wiring.
+- **Test surface grows to 25 Rust + 41 Python tests** (was 16
+  total at end of Phase 1a): +14 Rust integration tests for the
+  new assertions; +25 Python tests across duration parser,
+  freshness builder, JUnit writer, and JSON writer.
+
+### Fixed — Phase 1b
+
+- Freshness adapter panicked on PG 14+ because
+  `EXTRACT(EPOCH FROM ...)` returns `numeric` there (was
+  `double precision` on PG <14). Cast explicitly to
+  `double precision` — no-op on older versions, correct on
+  newer. Surfaced by the S-3.7 example running against
+  `postgres:16-alpine` while the integration tests used
+  `postgres:11-alpine` (testcontainers-modules' default).
+
 ### Added — Phase 1a (Sprint 2, PI-1)
 
 - **Engine foundation** (`crates/ematix-probe-core`):

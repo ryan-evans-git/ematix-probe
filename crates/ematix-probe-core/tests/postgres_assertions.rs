@@ -1,5 +1,5 @@
-//! S-2.3..S-2.5 — per-assertion behavior tests against a real
-//! Postgres instance via `testcontainers`.
+//! S-2.3..S-2.5 + S-3.1..S-3.4 — per-assertion behavior tests against
+//! a real Postgres instance via `testcontainers`.
 
 use async_trait::async_trait;
 use ematix_probe_core::adapters::data::postgres::PostgresAdapter;
@@ -232,5 +232,350 @@ async fn between_fails_when_values_out_of_range() {
     assert!(
         msg.contains('2'),
         "message should report 2 out-of-range rows, got: {msg:?}"
+    );
+}
+
+#[tokio::test]
+async fn regex_passes_when_all_match() {
+    let (_pg, url) = postgres().await;
+
+    let client = raw_client(&url).await;
+    client
+        .batch_execute(
+            "CREATE TABLE users (id SERIAL PRIMARY KEY, email TEXT);
+             INSERT INTO users (email) VALUES
+               ('a@x.io'), ('b@y.com'), ('carol@example.org');",
+        )
+        .await
+        .expect("setup");
+
+    let adapter = PostgresAdapter::connect(&url).await.expect("adapter");
+    let plan = ProbePlan {
+        schema: None,
+        table: "users".to_string(),
+        assertions: vec![Assertion::Regex {
+            column: "email".to_string(),
+            pattern: r".+@.+\..+".to_string(),
+        }],
+    };
+    let summary = adapter.execute(&plan).await.expect("execute");
+    assert_eq!(summary.verdict, Verdict::Pass);
+    assert_eq!(summary.assertions.len(), 1);
+    assert_eq!(summary.assertions[0].verdict, Verdict::Pass);
+}
+
+#[tokio::test]
+async fn regex_fails_when_any_value_violates() {
+    let (_pg, url) = postgres().await;
+
+    let client = raw_client(&url).await;
+    client
+        .batch_execute(
+            "CREATE TABLE users (id SERIAL PRIMARY KEY, email TEXT);
+             -- 'not-an-email' lacks the '@'+TLD shape, NULL is not
+             -- a violation (NULL ~ pat is unknown).
+             INSERT INTO users (email) VALUES
+               ('a@x.io'), ('not-an-email'), (NULL), ('b@y.com');",
+        )
+        .await
+        .expect("setup");
+
+    let adapter = PostgresAdapter::connect(&url).await.expect("adapter");
+    let plan = ProbePlan {
+        schema: None,
+        table: "users".to_string(),
+        assertions: vec![Assertion::Regex {
+            column: "email".to_string(),
+            pattern: r".+@.+\..+".to_string(),
+        }],
+    };
+    let summary = adapter.execute(&plan).await.expect("execute");
+    assert_eq!(
+        summary.verdict,
+        Verdict::Fail,
+        "one non-matching email should fail the assertion"
+    );
+    let msg = summary.assertions[0]
+        .message
+        .as_ref()
+        .expect("message present on fail");
+    assert!(
+        msg.contains("email"),
+        "message should reference column, got: {msg:?}"
+    );
+    assert!(
+        msg.contains('1'),
+        "message should report 1 non-matching row, got: {msg:?}"
+    );
+}
+
+#[tokio::test]
+async fn enum_passes_when_all_values_in_allowed_set() {
+    let (_pg, url) = postgres().await;
+
+    let client = raw_client(&url).await;
+    client
+        .batch_execute(
+            "CREATE TABLE shipments (id SERIAL PRIMARY KEY, country TEXT);
+             INSERT INTO shipments (country) VALUES
+               ('US'), ('CA'), ('US'), ('MX'), ('CA');",
+        )
+        .await
+        .expect("setup");
+
+    let adapter = PostgresAdapter::connect(&url).await.expect("adapter");
+    let plan = ProbePlan {
+        schema: None,
+        table: "shipments".to_string(),
+        assertions: vec![Assertion::Enum {
+            column: "country".to_string(),
+            allowed: vec!["US".to_string(), "CA".to_string(), "MX".to_string()],
+        }],
+    };
+    let summary = adapter.execute(&plan).await.expect("execute");
+    assert_eq!(summary.verdict, Verdict::Pass);
+    assert_eq!(summary.assertions[0].verdict, Verdict::Pass);
+}
+
+#[tokio::test]
+async fn enum_fails_when_value_outside_allowed_set() {
+    let (_pg, url) = postgres().await;
+
+    let client = raw_client(&url).await;
+    client
+        .batch_execute(
+            "CREATE TABLE shipments (id SERIAL PRIMARY KEY, country TEXT);
+             -- 'ZZ' is the violation; NULL is not counted.
+             INSERT INTO shipments (country) VALUES
+               ('US'), ('ZZ'), (NULL), ('CA');",
+        )
+        .await
+        .expect("setup");
+
+    let adapter = PostgresAdapter::connect(&url).await.expect("adapter");
+    let plan = ProbePlan {
+        schema: None,
+        table: "shipments".to_string(),
+        assertions: vec![Assertion::Enum {
+            column: "country".to_string(),
+            allowed: vec!["US".to_string(), "CA".to_string(), "MX".to_string()],
+        }],
+    };
+    let summary = adapter.execute(&plan).await.expect("execute");
+    assert_eq!(summary.verdict, Verdict::Fail);
+    let msg = summary.assertions[0]
+        .message
+        .as_ref()
+        .expect("message present on fail");
+    assert!(msg.contains("country"), "message: {msg:?}");
+    assert!(
+        msg.contains('1'),
+        "message should report 1 disallowed row, got: {msg:?}"
+    );
+}
+
+#[tokio::test]
+async fn row_count_at_least_fails_on_empty_table() {
+    let (_pg, url) = postgres().await;
+
+    let client = raw_client(&url).await;
+    client
+        .batch_execute("CREATE TABLE events (id SERIAL PRIMARY KEY, payload TEXT);")
+        .await
+        .expect("setup");
+
+    let adapter = PostgresAdapter::connect(&url).await.expect("adapter");
+    let plan = ProbePlan {
+        schema: None,
+        table: "events".to_string(),
+        assertions: vec![Assertion::RowCount {
+            low: Some(1),
+            high: None,
+        }],
+    };
+    let summary = adapter.execute(&plan).await.expect("execute");
+    assert_eq!(
+        summary.verdict,
+        Verdict::Fail,
+        "empty table should fail at_least(1)"
+    );
+    let msg = summary.assertions[0]
+        .message
+        .as_ref()
+        .expect("message present on fail");
+    assert!(
+        msg.contains('0'),
+        "message should mention actual count 0, got: {msg:?}"
+    );
+    assert!(
+        msg.contains('1'),
+        "message should mention low bound 1, got: {msg:?}"
+    );
+}
+
+#[tokio::test]
+async fn row_count_at_most_fails_when_oversized() {
+    let (_pg, url) = postgres().await;
+
+    let client = raw_client(&url).await;
+    // Insert 1500 rows so at_most(1000) fails by 500.
+    client
+        .batch_execute(
+            "CREATE TABLE events (id SERIAL PRIMARY KEY, payload TEXT);
+             INSERT INTO events (payload) SELECT 'x' FROM generate_series(1, 1500);",
+        )
+        .await
+        .expect("setup");
+
+    let adapter = PostgresAdapter::connect(&url).await.expect("adapter");
+    let plan = ProbePlan {
+        schema: None,
+        table: "events".to_string(),
+        assertions: vec![Assertion::RowCount {
+            low: None,
+            high: Some(1000),
+        }],
+    };
+    let summary = adapter.execute(&plan).await.expect("execute");
+    assert_eq!(summary.verdict, Verdict::Fail);
+    let msg = summary.assertions[0]
+        .message
+        .as_ref()
+        .expect("message present on fail");
+    assert!(
+        msg.contains("1500"),
+        "message should mention actual count 1500, got: {msg:?}"
+    );
+    assert!(
+        msg.contains("1000"),
+        "message should mention high bound 1000, got: {msg:?}"
+    );
+}
+
+#[tokio::test]
+async fn row_count_passes_when_in_range() {
+    let (_pg, url) = postgres().await;
+
+    let client = raw_client(&url).await;
+    client
+        .batch_execute(
+            "CREATE TABLE events (id SERIAL PRIMARY KEY, payload TEXT);
+             INSERT INTO events (payload) SELECT 'x' FROM generate_series(1, 50);",
+        )
+        .await
+        .expect("setup");
+
+    let adapter = PostgresAdapter::connect(&url).await.expect("adapter");
+    let plan = ProbePlan {
+        schema: None,
+        table: "events".to_string(),
+        assertions: vec![Assertion::RowCount {
+            low: Some(1),
+            high: Some(100),
+        }],
+    };
+    let summary = adapter.execute(&plan).await.expect("execute");
+    assert_eq!(summary.verdict, Verdict::Pass);
+}
+
+#[tokio::test]
+async fn freshness_passes_when_max_recent() {
+    let (_pg, url) = postgres().await;
+
+    let client = raw_client(&url).await;
+    client
+        .batch_execute(
+            "CREATE TABLE events (id SERIAL PRIMARY KEY, updated_at TIMESTAMPTZ);
+             -- newest row 5 minutes ago — well within a 24h window.
+             INSERT INTO events (updated_at) VALUES
+               (now() - interval '6 hours'),
+               (now() - interval '5 minutes'),
+               (now() - interval '2 hours');",
+        )
+        .await
+        .expect("setup");
+
+    let adapter = PostgresAdapter::connect(&url).await.expect("adapter");
+    let plan = ProbePlan {
+        schema: None,
+        table: "events".to_string(),
+        assertions: vec![Assertion::Freshness {
+            column: "updated_at".to_string(),
+            within_seconds: 24 * 3600,
+        }],
+    };
+    let summary = adapter.execute(&plan).await.expect("execute");
+    assert_eq!(summary.verdict, Verdict::Pass);
+}
+
+#[tokio::test]
+async fn freshness_fails_when_max_too_old() {
+    let (_pg, url) = postgres().await;
+
+    let client = raw_client(&url).await;
+    client
+        .batch_execute(
+            "CREATE TABLE events (id SERIAL PRIMARY KEY, updated_at TIMESTAMPTZ);
+             -- newest row 48 hours old → fails within(24h).
+             INSERT INTO events (updated_at) VALUES
+               (now() - interval '72 hours'),
+               (now() - interval '48 hours');",
+        )
+        .await
+        .expect("setup");
+
+    let adapter = PostgresAdapter::connect(&url).await.expect("adapter");
+    let plan = ProbePlan {
+        schema: None,
+        table: "events".to_string(),
+        assertions: vec![Assertion::Freshness {
+            column: "updated_at".to_string(),
+            within_seconds: 24 * 3600,
+        }],
+    };
+    let summary = adapter.execute(&plan).await.expect("execute");
+    assert_eq!(summary.verdict, Verdict::Fail);
+    let msg = summary.assertions[0]
+        .message
+        .as_ref()
+        .expect("message present on fail");
+    assert!(
+        msg.contains("updated_at"),
+        "message should reference column, got: {msg:?}"
+    );
+}
+
+#[tokio::test]
+async fn freshness_fails_on_empty_table() {
+    let (_pg, url) = postgres().await;
+
+    let client = raw_client(&url).await;
+    client
+        .batch_execute("CREATE TABLE events (id SERIAL PRIMARY KEY, updated_at TIMESTAMPTZ);")
+        .await
+        .expect("setup");
+
+    let adapter = PostgresAdapter::connect(&url).await.expect("adapter");
+    let plan = ProbePlan {
+        schema: None,
+        table: "events".to_string(),
+        assertions: vec![Assertion::Freshness {
+            column: "updated_at".to_string(),
+            within_seconds: 24 * 3600,
+        }],
+    };
+    let summary = adapter.execute(&plan).await.expect("execute");
+    assert_eq!(
+        summary.verdict,
+        Verdict::Fail,
+        "empty table provides no freshness signal — should fail"
+    );
+    let msg = summary.assertions[0]
+        .message
+        .as_ref()
+        .expect("message present on fail");
+    assert!(
+        msg.to_lowercase().contains("no rows") || msg.to_lowercase().contains("empty"),
+        "message should mention emptiness, got: {msg:?}"
     );
 }

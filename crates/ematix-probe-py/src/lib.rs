@@ -47,6 +47,10 @@ impl PyAssertion {
             core::Assertion::NotNull { .. } => "not_null",
             core::Assertion::Unique { .. } => "unique",
             core::Assertion::Between { .. } => "between",
+            core::Assertion::Regex { .. } => "regex",
+            core::Assertion::Enum { .. } => "enum",
+            core::Assertion::RowCount { .. } => "row_count",
+            core::Assertion::Freshness { .. } => "freshness",
             _ => "unknown",
         }
     }
@@ -225,6 +229,38 @@ fn assertion_between(column: String, low: f64, high: f64) -> PyAssertion {
     }
 }
 
+#[pyfunction]
+fn assertion_freshness(column: String, within_seconds: i64) -> PyAssertion {
+    PyAssertion {
+        inner: core::Assertion::Freshness {
+            column,
+            within_seconds,
+        },
+    }
+}
+
+#[pyfunction]
+fn assertion_regex(column: String, pattern: String) -> PyAssertion {
+    PyAssertion {
+        inner: core::Assertion::Regex { column, pattern },
+    }
+}
+
+#[pyfunction]
+fn assertion_enum(column: String, allowed: Vec<String>) -> PyAssertion {
+    PyAssertion {
+        inner: core::Assertion::Enum { column, allowed },
+    }
+}
+
+#[pyfunction]
+#[pyo3(signature = (low=None, high=None))]
+fn assertion_row_count(low: Option<i64>, high: Option<i64>) -> PyAssertion {
+    PyAssertion {
+        inner: core::Assertion::RowCount { low, high },
+    }
+}
+
 #[pymodule]
 fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("__version__", core::VERSION)?;
@@ -235,6 +271,10 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(assertion_not_null, m)?)?;
     m.add_function(wrap_pyfunction!(assertion_unique, m)?)?;
     m.add_function(wrap_pyfunction!(assertion_between, m)?)?;
+    m.add_function(wrap_pyfunction!(assertion_freshness, m)?)?;
+    m.add_function(wrap_pyfunction!(assertion_regex, m)?)?;
+    m.add_function(wrap_pyfunction!(assertion_enum, m)?)?;
+    m.add_function(wrap_pyfunction!(assertion_row_count, m)?)?;
     m.add_function(wrap_pyfunction!(run_postgres_probe, m)?)?;
     Ok(())
 }
