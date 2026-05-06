@@ -1,0 +1,24 @@
+[package]
+name = "ematix-probe-py"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "Python bindings for ematix-probe."
+
+[lib]
+name = "_core"
+crate-type = ["cdylib", "rlib"]
+
+[features]
+# Enabled by maturin via pyproject.toml. Gating it here (instead of in
+# the workspace pyo3 dep) lets `cargo test --workspace` link the test
+# binary against a real libpython; maturin re-enables it for the
+# Python-loaded cdylib where the host process provides the symbols.
+extension-module = ["pyo3/extension-module"]
+
+[dependencies]
+ematix-probe-core = { workspace = true }
+pyo3 = { workspace = true }

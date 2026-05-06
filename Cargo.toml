@@ -1,0 +1,20 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/ematix-probe-core",
+    "crates/ematix-probe-cli",
+    "crates/ematix-probe-py",
+]
+
+[workspace.package]
+version = "0.1.0-dev"
+edition = "2021"
+rust-version = "1.85"
+license = "Apache-2.0"
+authors = ["Ryan Evans <ryanevans23@gmail.com>"]
+repository = "https://github.com/ryan-evans-git/ematix-probe"
+
+[workspace.dependencies]
+ematix-probe-core = { path = "crates/ematix-probe-core" }
+clap = { version = "4", features = ["derive"] }
+pyo3 = { version = "0.28" }
