@@ -7,3 +7,10 @@ license.workspace = true
 authors.workspace = true
 repository.workspace = true
 description = "Core engine for ematix-probe — declarative data + load testing on a Rust core."
+
+[dependencies]
+async-trait = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true }
