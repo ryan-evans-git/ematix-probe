@@ -6,7 +6,6 @@ collects assertions through the fluent API and produces a Rust-side
 """
 
 import pytest
-
 from ematix_probe import probe, source
 
 
