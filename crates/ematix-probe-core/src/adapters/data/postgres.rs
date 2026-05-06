@@ -12,7 +12,7 @@ use deadpool_postgres::{Manager, ManagerConfig, Pool, RecyclingMethod};
 use tokio_postgres::{Config, NoTls};
 
 use crate::adapters::data::{AdapterError, DataAdapter};
-use crate::engine::data::{AssertionResult, ProbePlan, RunSummary, Verdict};
+use crate::engine::data::{Assertion, AssertionResult, ProbePlan, RunSummary, Verdict};
 
 /// Pooled Postgres adapter.
 ///
@@ -71,15 +71,60 @@ impl PostgresAdapter {
 #[async_trait]
 impl DataAdapter for PostgresAdapter {
     async fn execute(&self, plan: &ProbePlan) -> Result<RunSummary, AdapterError> {
-        let results: Vec<AssertionResult> = Vec::with_capacity(plan.assertions.len());
-        // S-2.3..S-2.5 dispatch on `Assertion` variants here. Until
-        // those variants exist, `plan.assertions` is provably empty
-        // (the enum has no variants), so the result vector is too.
-        let verdict = reduce_verdict(&results);
+        let mut results: Vec<AssertionResult> = Vec::with_capacity(plan.assertions.len());
+        for (idx, assertion) in plan.assertions.iter().enumerate() {
+            let result = match assertion {
+                Assertion::NotNull { column } => self.run_not_null(plan, idx, column).await?,
+            };
+            results.push(result);
+        }
         Ok(RunSummary {
-            verdict,
+            verdict: reduce_verdict(&results),
             assertions: results,
         })
+    }
+}
+
+impl PostgresAdapter {
+    /// Pushdown SQL for `NotNull`:
+    ///   `SELECT count(*) FROM <qualified-table> WHERE <col> IS NULL`
+    /// Pass when count = 0; Fail with row-count detail otherwise.
+    async fn run_not_null(
+        &self,
+        plan: &ProbePlan,
+        idx: usize,
+        column: &str,
+    ) -> Result<AssertionResult, AdapterError> {
+        let table = qualified_table(plan.schema.as_deref(), &plan.table);
+        let col = quote_ident(column);
+        let sql = format!("SELECT count(*) FROM {table} WHERE {col} IS NULL");
+
+        let client = self
+            .pool
+            .get()
+            .await
+            .map_err(|e| AdapterError::Connection(format!("acquire failed: {e}")))?;
+        let row = client
+            .query_one(&sql, &[])
+            .await
+            .map_err(|e| AdapterError::Query(format!("not_null query failed: {e}")))?;
+        let null_count: i64 = row.get(0);
+
+        if null_count == 0 {
+            Ok(AssertionResult {
+                assertion_index: idx,
+                verdict: Verdict::Pass,
+                message: None,
+            })
+        } else {
+            Ok(AssertionResult {
+                assertion_index: idx,
+                verdict: Verdict::Fail,
+                message: Some(format!(
+                    "column {column:?} has {null_count} NULL row(s); expected 0"
+                )),
+            })
+        }
     }
 }
 
@@ -92,5 +137,49 @@ pub(crate) fn reduce_verdict(results: &[AssertionResult]) -> Verdict {
         Verdict::Fail
     } else {
         Verdict::Pass
+    }
+}
+
+/// Quote a Postgres identifier (table or column).
+/// Embedded `"` characters are doubled per the SQL standard.
+fn quote_ident(s: &str) -> String {
+    format!("\"{}\"", s.replace('"', "\"\""))
+}
+
+/// Build a qualified `"schema"."table"` (or just `"table"` when no
+/// schema). Both halves go through `quote_ident` so reserved words
+/// and embedded quotes are safe.
+fn qualified_table(schema: Option<&str>, table: &str) -> String {
+    match schema {
+        Some(s) => format!("{}.{}", quote_ident(s), quote_ident(table)),
+        None => quote_ident(table),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn quote_ident_wraps_simple_name() {
+        assert_eq!(quote_ident("foo"), "\"foo\"");
+    }
+
+    #[test]
+    fn quote_ident_doubles_embedded_quote() {
+        assert_eq!(quote_ident("we\"ird"), "\"we\"\"ird\"");
+    }
+
+    #[test]
+    fn qualified_table_with_schema() {
+        assert_eq!(
+            qualified_table(Some("analytics"), "dim_customers"),
+            "\"analytics\".\"dim_customers\""
+        );
+    }
+
+    #[test]
+    fn qualified_table_without_schema() {
+        assert_eq!(qualified_table(None, "users"), "\"users\"");
     }
 }

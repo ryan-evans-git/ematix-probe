@@ -5,8 +5,8 @@ use async_trait::async_trait;
 use ematix_probe_core::adapters::data::postgres::PostgresAdapter;
 use ematix_probe_core::{Assertion, DataAdapter, ProbePlan, Verdict};
 use testcontainers_modules::postgres::Postgres;
-use testcontainers_modules::testcontainers::ContainerAsync;
 use testcontainers_modules::testcontainers::runners::AsyncRunner;
+use testcontainers_modules::testcontainers::ContainerAsync;
 use tokio_postgres::NoTls;
 
 // `async_trait` is referenced only inside test-only helper impls;
