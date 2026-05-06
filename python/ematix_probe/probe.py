@@ -22,10 +22,10 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import datetime, timezone
 
 from ematix_probe._core import (
     ProbePlan,
-    RunReport,
     assertion_between,
     assertion_freshness,
     assertion_not_null,
@@ -34,6 +34,7 @@ from ematix_probe._core import (
 )
 
 from .duration import parse_duration
+from .report import AssertionResult, RunReport
 from .source import Source
 
 
@@ -144,7 +145,10 @@ class DataProbe:
     def _build_plan(self) -> ProbePlan:
         tester = Tester()
         self._fn(tester)
-        rust_assertions = [_to_rust(spec) for spec in tester._specs]
+        # Stash the specs so .run() can name each assertion in the
+        # RunReport (the pyo3 result only carries indices).
+        self._specs: list[_AssertionSpec] = list(tester._specs)
+        rust_assertions = [_to_rust(spec) for spec in self._specs]
         return ProbePlan(self._schema, self._table, rust_assertions)
 
     def plan(self) -> ProbePlan:
@@ -155,13 +159,35 @@ class DataProbe:
         """Execute the probe against the configured source. Sync;
         async support lands with the pytest plugin in Sprint 9.
         Only Postgres sources are wired in v0.1 Phase 1a."""
-        if self._source.kind == "postgres":
-            return run_postgres_probe(self._source.url, self._plan)
-        # DuckDB / Parquet adapters land in Phase 2; until then we
-        # error explicitly rather than silently no-op.
-        raise NotImplementedError(
-            f"source kind {self._source.kind!r} is not yet supported by "
-            f"DataProbe.run() in v0.1 Phase 1a"
+        if self._source.kind != "postgres":
+            # DuckDB / Parquet adapters land in Phase 2; until then we
+            # error explicitly rather than silently no-op.
+            raise NotImplementedError(
+                f"source kind {self._source.kind!r} is not yet supported by "
+                f"DataProbe.run() in v0.1 Phase 1a"
+            )
+
+        started_at = datetime.now(tz=timezone.utc)
+        raw = run_postgres_probe(self._source.url, self._plan)
+        finished_at = datetime.now(tz=timezone.utc)
+
+        assertions = [
+            AssertionResult(
+                assertion_index=r.assertion_index,
+                verdict=r.verdict,
+                message=r.message,
+                name=_assertion_name(self._specs[r.assertion_index]),
+            )
+            for r in raw.assertions
+        ]
+        return RunReport(
+            probe_name=self.__name__,
+            table=self._table,
+            schema=self._schema,
+            verdict=raw.verdict,
+            assertions=assertions,
+            started_at=started_at,
+            finished_at=finished_at,
         )
 
     @property
@@ -175,6 +201,17 @@ class DataProbe:
     @property
     def schema(self) -> str | None:
         return self._schema
+
+
+def _assertion_name(spec: _AssertionSpec) -> str:
+    """Human label for the report. Column-level checks read as
+    ``"<column>.<kind>"``; table-level reads as ``"<kind>(<column>)"``
+    or just ``"<kind>"`` when there's no associated column."""
+    if spec.kind in ("not_null", "unique", "between"):
+        return f"{spec.column}.{spec.kind}"
+    if spec.kind == "freshness":
+        return f"freshness({spec.column})"
+    return spec.kind
 
 
 def _to_rust(spec: _AssertionSpec):
