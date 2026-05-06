@@ -11,7 +11,10 @@ description = "Core engine for ematix-probe — declarative data + load testing 
 [dependencies]
 async-trait = { workspace = true }
 thiserror = { workspace = true }
+tokio-postgres = { workspace = true }
+deadpool-postgres = { workspace = true }
 
 [dev-dependencies]
 async-trait = { workspace = true }
 tokio = { workspace = true }
+testcontainers-modules = { workspace = true }
