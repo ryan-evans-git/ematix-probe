@@ -75,3 +75,117 @@ def test_decorator_preserves_callable_function():
     # an object, not the raw function. We just need the original
     # name reachable for diagnostics.
     assert my_probe.__name__ == "my_probe"
+
+
+def test_regex_assertion_translates_through_to_plan():
+    @probe.data(source=source.postgres("postgres://localhost/db"), table="users")
+    def quality(t):
+        t.column("email").regex(r"^[^@]+@[^@]+$")
+
+    plan = quality.plan()
+    assert len(plan) == 1
+
+
+def test_is_in_assertion_translates_through_to_plan():
+    @probe.data(source=source.postgres("postgres://localhost/db"), table="orders")
+    def quality(t):
+        t.column("status").is_in(["new", "shipped", "cancelled"])
+
+    plan = quality.plan()
+    assert len(plan) == 1
+
+
+def test_row_count_with_at_least_only():
+    @probe.data(source=source.postgres("postgres://localhost/db"), table="t")
+    def quality(t):
+        t.row_count(at_least=10)
+
+    assert len(quality.plan()) == 1
+
+
+def test_row_count_with_at_most_only():
+    @probe.data(source=source.postgres("postgres://localhost/db"), table="t")
+    def quality(t):
+        t.row_count(at_most=1000)
+
+    assert len(quality.plan()) == 1
+
+
+def test_row_count_rejects_no_bounds():
+    with pytest.raises(ValueError, match="at_least"):
+
+        @probe.data(source=source.postgres("postgres://localhost/db"), table="t")
+        def quality(t):
+            t.row_count()
+
+
+def test_freshness_assertion_translates_through_to_plan():
+    @probe.data(source=source.postgres("postgres://localhost/db"), table="events")
+    def quality(t):
+        t.freshness("ts", within="24h")
+
+    plan = quality.plan()
+    assert len(plan) == 1
+
+
+def test_data_probe_exposes_source_table_and_schema():
+    src = source.postgres("postgres://localhost/db")
+
+    @probe.data(source=src, table="dim_customers", schema="analytics")
+    def quality(t):
+        pass
+
+    assert quality.source is src
+    assert quality.table == "dim_customers"
+    assert quality.schema == "analytics"
+
+
+def test_assertion_name_formats_each_kind_correctly():
+    """`_assertion_name` is the label that lands in the run report.
+    Column-level checks render as "<col>.<kind>"; freshness gets a
+    function-call form; unknown / table-level kinds fall through to
+    the bare kind. Tested directly because the freshness branch is
+    only reachable when `.run()` translates a freshness spec back
+    into its label."""
+    from ematix_probe.probe import _AssertionSpec, _assertion_name
+
+    assert (
+        _assertion_name(_AssertionSpec(kind="not_null", column="email"))
+        == "email.not_null"
+    )
+    assert (
+        _assertion_name(_AssertionSpec(kind="freshness", column="ts"))
+        == "freshness(ts)"
+    )
+    assert _assertion_name(_AssertionSpec(kind="row_count")) == "row_count"
+
+
+def test_to_rust_raises_on_unknown_kind():
+    """`_to_rust` fans out a Python-side spec to the matching pyo3
+    factory. An unknown kind would only appear if `_AssertionSpec`
+    grew a new variant without `_to_rust` catching up — guarded by
+    a defensive AssertionError so the bug surfaces at decoration
+    time rather than producing an inscrutable Rust panic later."""
+    from ematix_probe.probe import _AssertionSpec, _to_rust
+
+    bogus = _AssertionSpec(kind="totally_made_up", column="x")
+    with pytest.raises(AssertionError, match="unknown assertion kind"):
+        _to_rust(bogus)
+
+
+def test_data_probe_run_rejects_non_postgres_sources():
+    """Until DuckDB / Parquet adapters land in Phase 2, `.run()`
+    must raise NotImplementedError rather than silently no-op when
+    pointed at a non-Postgres source. Constructed via Source's
+    private constructor since the public factories all return
+    postgres sources today."""
+    from ematix_probe.source import Source
+
+    duckdb_source = Source(kind="duckdb", url="duckdb:///tmp/x.db")
+
+    @probe.data(source=duckdb_source, table="t")
+    def quality(t):
+        t.column("x").not_null()
+
+    with pytest.raises(NotImplementedError, match="duckdb"):
+        quality.run()
