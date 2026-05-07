@@ -7,6 +7,8 @@ collects assertions through the fluent API and produces a Rust-side
 
 import pytest
 from ematix_probe import probe, source
+from ematix_probe.probe import _assertion_name, _AssertionSpec, _to_rust
+from ematix_probe.source import Source
 
 
 def test_decorator_builds_plan_with_three_assertions():
@@ -147,8 +149,6 @@ def test_assertion_name_formats_each_kind_correctly():
     the bare kind. Tested directly because the freshness branch is
     only reachable when `.run()` translates a freshness spec back
     into its label."""
-    from ematix_probe.probe import _AssertionSpec, _assertion_name
-
     assert (
         _assertion_name(_AssertionSpec(kind="not_null", column="email"))
         == "email.not_null"
@@ -166,8 +166,6 @@ def test_to_rust_raises_on_unknown_kind():
     grew a new variant without `_to_rust` catching up — guarded by
     a defensive AssertionError so the bug surfaces at decoration
     time rather than producing an inscrutable Rust panic later."""
-    from ematix_probe.probe import _AssertionSpec, _to_rust
-
     bogus = _AssertionSpec(kind="totally_made_up", column="x")
     with pytest.raises(AssertionError, match="unknown assertion kind"):
         _to_rust(bogus)
@@ -179,8 +177,6 @@ def test_data_probe_run_rejects_non_postgres_sources():
     pointed at a non-Postgres source. Constructed via Source's
     private constructor since the public factories all return
     postgres sources today."""
-    from ematix_probe.source import Source
-
     duckdb_source = Source(kind="duckdb", url="duckdb:///tmp/x.db")
 
     @probe.data(source=duckdb_source, table="t")
