@@ -1,0 +1,41 @@
+# cargo-deny configuration. CI runs `cargo deny check licenses` in the
+# rust job; this file declares which SPDX licenses we accept across the
+# full Rust dependency closure (direct + transitive). The audit on
+# 2026-05-07 showed 289 external deps, all permissive or dual-licensed
+# permissive — see the OSS license audit in CHANGELOG / commit history
+# for the breakdown that produced this allowlist.
+#
+# Adding a new license to `allow` is a deliberate decision: copyleft
+# (GPL/AGPL/LGPL) and source-available (SSPL/BUSL/Elastic/Commons-Clause)
+# stay out by default. If a future transitive bump drags one in, CI
+# fails and the bump must be reviewed before merge.
+
+[licenses]
+version = 2
+
+# Confidence threshold for license-text detection (0.0–1.0). 0.93 is
+# cargo-deny's recommended default; anything below this falls back to
+# the `clarify` mechanism (not used here yet).
+confidence-threshold = 0.93
+
+allow = [
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "MIT",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Unicode-3.0",
+    "Zlib",
+    "Unlicense",
+    "BSL-1.0",
+    "MPL-2.0",
+]
+
+# Per-crate license overrides go here as `[[licenses.clarify]]`
+# entries when a dep ships without a SPDX field but the upstream
+# license is verifiable from a `LICENSE` file in the source tree.
+# `ring` (in our closure via `tokio-postgres`/TLS deps) is a known
+# case that historically needed clarify; keep this section empty
+# until CI fails and we can pin the actual license-file hash from
+# the cargo-deny error output.

@@ -46,10 +46,13 @@ Issues = "https://github.com/ryan-evans-git/ematix-probe/issues"
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
+    "pytest-cov>=5.0",
     "ruff>=0.5",
     "maturin>=1.7",
     "bandit>=1.7",
     "pip-audit>=2.7",
+    "pip-licenses>=5.0",
+    "pip-tools>=7.4",
     "testcontainers[postgres]>=4.0",
     "psycopg2-binary>=2.9",
 ]
@@ -77,6 +80,14 @@ select = [
 [tool.pytest.ini_options]
 testpaths = ["tests", "python"]
 addopts = "-q"
+
+[tool.coverage.run]
+# `branch = true` makes local `pytest --cov` runs match CI, which
+# gates PRs at 90% branch coverage (see .github/workflows/ci.yml).
+# `source` keeps coverage focused on the `ematix_probe` package
+# rather than test files or the maturin-built `_core.so`.
+branch = true
+source = ["ematix_probe"]
 
 [tool.bandit]
 # bandit scans `python/` for security smells. Test fixtures often
