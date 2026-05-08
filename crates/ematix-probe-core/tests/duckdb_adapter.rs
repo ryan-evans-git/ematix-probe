@@ -129,3 +129,17 @@ async fn duckdb_missing_table_yields_error() {
         "missing table should be a connect/query error, got: {result:?}"
     );
 }
+
+#[tokio::test]
+async fn duckdb_open_invalid_path_errors() {
+    // A directory path can't be opened as a duckdb file.
+    let result = DuckDbAdapter::open("/this/path/should/not/exist/db.duckdb");
+    assert!(result.is_err(), "missing parent dir should error");
+}
+
+#[tokio::test]
+async fn duckdb_execute_setup_invalid_sql_errors() {
+    let a = DuckDbAdapter::open(":memory:").expect("open");
+    let result = a.execute_setup("THIS IS NOT VALID SQL;").await;
+    assert!(result.is_err(), "invalid setup SQL should error");
+}

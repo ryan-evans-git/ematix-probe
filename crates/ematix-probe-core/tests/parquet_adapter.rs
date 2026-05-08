@@ -144,3 +144,72 @@ async fn parquet_missing_file_yields_open_error() {
     assert!(result.is_err(), "missing file should error; got Ok");
     drop(result);
 }
+
+#[tokio::test]
+async fn parquet_corrupt_file_yields_builder_error() {
+    let dir = TempDir::new().unwrap();
+    let path = dir.path().join("corrupt.parquet");
+    std::fs::write(&path, b"this is not a parquet file").unwrap();
+    let result = ParquetAdapter::open(&path);
+    assert!(result.is_err(), "non-parquet bytes should fail builder");
+    drop(result);
+}
+
+#[tokio::test]
+async fn parquet_table_level_assertions_work() {
+    // row_count + freshness in one plan exercises the table-level
+    // dispatch path through the parquet adapter.
+    let dir = TempDir::new().unwrap();
+    let path = dir.path().join("events.parquet");
+    let s = user_schema();
+    write_parquet(
+        &path,
+        vec![user_batch(
+            s.clone(),
+            vec![1, 2, 3],
+            vec![Some("a@x.com"), Some("b@y.org"), Some("c@z.io")],
+            vec![Some(25.0), Some(40.0), Some(33.0)],
+        )],
+    );
+
+    let a = ParquetAdapter::open(&path).expect("open");
+    let p = plan(vec![Assertion::RowCount {
+        low: Some(1),
+        high: Some(100),
+    }]);
+    let summary = a.execute(&p).await.expect("execute");
+    assert_eq!(summary.verdict, Verdict::Pass);
+}
+
+#[tokio::test]
+async fn parquet_regex_and_enum_via_scan_path() {
+    let dir = TempDir::new().unwrap();
+    let path = dir.path().join("re.parquet");
+    let s = user_schema();
+    write_parquet(
+        &path,
+        vec![user_batch(
+            s.clone(),
+            vec![1, 2],
+            vec![Some("a@x.com"), Some("not-an-email")],
+            vec![Some(25.0), Some(40.0)],
+        )],
+    );
+
+    let a = ParquetAdapter::open(&path).expect("open");
+    let p = plan(vec![
+        Assertion::Regex {
+            column: "email".into(),
+            pattern: r".+@.+\..+".into(),
+        },
+        Assertion::Enum {
+            column: "email".into(),
+            allowed: vec!["a@x.com".into(), "not-an-email".into()],
+        },
+    ]);
+    let summary = a.execute(&p).await.expect("execute");
+    // Regex fails (1 bad email); enum passes (both values allowed).
+    assert_eq!(summary.verdict, Verdict::Fail);
+    assert_eq!(summary.assertions[0].verdict, Verdict::Fail);
+    assert_eq!(summary.assertions[1].verdict, Verdict::Pass);
+}
