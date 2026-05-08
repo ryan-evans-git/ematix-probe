@@ -10,8 +10,8 @@
 
 use std::time::Duration;
 
-use ematix_probe_core::engine::load::{evaluate_load, LoadAssertion, LoadPlan, Sample};
 use ematix_probe_core::engine::load::HttpTarget;
+use ematix_probe_core::engine::load::{evaluate_load, LoadAssertion, LoadPlan, Sample};
 use ematix_probe_core::Verdict;
 
 fn plan(assertions: Vec<LoadAssertion>) -> LoadPlan {
@@ -37,7 +37,9 @@ fn p99_passes_when_under_threshold() {
     // Latencies: 100 samples uniformly 1..100 ms.
     // P99 = value at floor(0.99 * 99) = 98 → 99 ms.
     // Threshold 200 ms → pass.
-    let samples: Vec<Sample> = (1..=100).map(|i| sample(i as u64, i as u64, Some(200))).collect();
+    let samples: Vec<Sample> = (1..=100)
+        .map(|i| sample(i as u64, i as u64, Some(200)))
+        .collect();
     let p = plan(vec![LoadAssertion::P99Under {
         metric: "latency_ms".into(),
         threshold_ms: 200.0,
@@ -48,7 +50,9 @@ fn p99_passes_when_under_threshold() {
 
 #[test]
 fn p99_fails_when_over_threshold() {
-    let samples: Vec<Sample> = (1..=100).map(|i| sample(i as u64, i as u64, Some(200))).collect();
+    let samples: Vec<Sample> = (1..=100)
+        .map(|i| sample(i as u64, i as u64, Some(200)))
+        .collect();
     let p = plan(vec![LoadAssertion::P99Under {
         metric: "latency_ms".into(),
         threshold_ms: 50.0,
@@ -57,7 +61,10 @@ fn p99_fails_when_over_threshold() {
     assert_eq!(summary.verdict, Verdict::Fail);
     let msg = summary.assertions[0].message.as_ref().expect("message");
     assert!(msg.contains("p99"), "msg should reference p99: {msg:?}");
-    assert!(msg.contains("99"), "msg should reference observed value: {msg:?}");
+    assert!(
+        msg.contains("99"),
+        "msg should reference observed value: {msg:?}"
+    );
 }
 
 #[test]
