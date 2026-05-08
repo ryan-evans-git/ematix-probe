@@ -6,6 +6,7 @@
 pub mod duckdb;
 pub mod parquet;
 pub mod postgres;
+pub mod s3_parquet;
 
 use crate::engine::data::{ProbePlan, RunSummary};
 use async_trait::async_trait;

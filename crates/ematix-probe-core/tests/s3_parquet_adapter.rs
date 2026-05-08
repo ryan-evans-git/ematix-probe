@@ -61,14 +61,17 @@ async fn s3_adapter_runs_passing_probe_via_local_object_store() {
     let parquet_path = dir.path().join(parquet_name);
     write_parquet(&parquet_path);
 
-    let store: Arc<dyn ObjectStore> = Arc::new(LocalFileSystem::new_with_prefix(dir.path()).unwrap());
+    let store: Arc<dyn ObjectStore> =
+        Arc::new(LocalFileSystem::new_with_prefix(dir.path()).unwrap());
     let adapter = S3ParquetAdapter::from_object_store(store, parquet_name);
 
     let p = plan(vec![
         Assertion::NotNull {
             column: "email".into(),
         },
-        Assertion::Unique { column: "id".into() },
+        Assertion::Unique {
+            column: "id".into(),
+        },
         Assertion::Between {
             column: "age".into(),
             low: 0.0,
@@ -105,14 +108,17 @@ async fn s3_adapter_surfaces_failures() {
     w.write(&batch).unwrap();
     w.close().unwrap();
 
-    let store: Arc<dyn ObjectStore> = Arc::new(LocalFileSystem::new_with_prefix(dir.path()).unwrap());
+    let store: Arc<dyn ObjectStore> =
+        Arc::new(LocalFileSystem::new_with_prefix(dir.path()).unwrap());
     let adapter = S3ParquetAdapter::from_object_store(store, parquet_name);
 
     let p = plan(vec![
         Assertion::NotNull {
             column: "email".into(),
         },
-        Assertion::Unique { column: "id".into() },
+        Assertion::Unique {
+            column: "id".into(),
+        },
         Assertion::Between {
             column: "age".into(),
             low: 0.0,
@@ -130,7 +136,8 @@ async fn s3_adapter_surfaces_failures() {
 #[tokio::test]
 async fn s3_adapter_missing_object_yields_error() {
     let dir = TempDir::new().unwrap();
-    let store: Arc<dyn ObjectStore> = Arc::new(LocalFileSystem::new_with_prefix(dir.path()).unwrap());
+    let store: Arc<dyn ObjectStore> =
+        Arc::new(LocalFileSystem::new_with_prefix(dir.path()).unwrap());
     let adapter = S3ParquetAdapter::from_object_store(store, "does-not-exist.parquet");
     let p = plan(vec![Assertion::NotNull {
         column: "id".into(),
