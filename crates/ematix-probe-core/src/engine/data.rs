@@ -69,6 +69,18 @@ pub enum Assertion {
     /// time. The Python side parses duration strings like
     /// `"24h"` / `"6h"` / `"30m"` into seconds.
     Freshness { column: String, within_seconds: i64 },
+    /// The `p`-th percentile of the (non-NULL) values in `column`
+    /// must lie in `[low, high]` inclusive. `p ∈ [0.0, 1.0]`.
+    /// Scan-path only in v0.1 — pushdown adapters (Postgres) return
+    /// `Verdict::Error` with a "scan-path only" message until a
+    /// future story justifies a `percentile_cont` translation.
+    /// Empty / all-NULL columns produce `Error` ("not enough data").
+    PercentileBetween {
+        column: String,
+        p: f64,
+        low: f64,
+        high: f64,
+    },
 }
 
 /// A complete probe execution plan: which table to probe + the

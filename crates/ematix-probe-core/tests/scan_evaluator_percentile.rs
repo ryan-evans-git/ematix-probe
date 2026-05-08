@@ -145,8 +145,16 @@ async fn percentile_works_across_batches() {
 async fn percentile_skips_nulls() {
     let s = schema_f64();
     // Mix of NULL and 0..4. With 5 non-NULL values, p50 = value at idx 2 = 2.0.
-    let values: Vec<Option<f64>> =
-        vec![None, Some(0.0), None, Some(1.0), Some(2.0), None, Some(3.0), Some(4.0)];
+    let values: Vec<Option<f64>> = vec![
+        None,
+        Some(0.0),
+        None,
+        Some(1.0),
+        Some(2.0),
+        None,
+        Some(3.0),
+        Some(4.0),
+    ];
     let v = run(
         p(Assertion::PercentileBetween {
             column: "v".into(),
