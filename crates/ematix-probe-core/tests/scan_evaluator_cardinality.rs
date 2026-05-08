@@ -221,11 +221,7 @@ async fn cardinality_both_bounds_none_yields_error() {
 #[tokio::test]
 async fn cardinality_unsupported_type_yields_error() {
     use arrow::array::Float64Array;
-    let (s, b) = one_col(
-        "f",
-        DataType::Float64,
-        Float64Array::from(vec![Some(1.0)]),
-    );
+    let (s, b) = one_col("f", DataType::Float64, Float64Array::from(vec![Some(1.0)]));
     let v = run(
         p(Assertion::CardinalityBetween {
             column: "f".into(),

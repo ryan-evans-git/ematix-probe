@@ -81,6 +81,17 @@ pub enum Assertion {
         low: f64,
         high: f64,
     },
+    /// Distinct-value count in `column` (NULLs excluded) must lie
+    /// in `[low, high]`, where either bound may be `None` for
+    /// "unbounded on that side". Same `Option<i64>` shape as
+    /// `RowCount`. Both `None` is rejected at adapter time.
+    /// Scan-path only in v0.1 — Postgres pushdown via `count(distinct
+    /// col)` is straightforward but waits on a real ask.
+    CardinalityBetween {
+        column: String,
+        low: Option<i64>,
+        high: Option<i64>,
+    },
 }
 
 /// A complete probe execution plan: which table to probe + the

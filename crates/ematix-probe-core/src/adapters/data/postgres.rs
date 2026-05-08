@@ -110,6 +110,16 @@ impl DataAdapter for PostgresAdapter {
                          assertion in v0.1"
                     )),
                 },
+                Assertion::CardinalityBetween { column, .. } => AssertionResult {
+                    assertion_index: idx,
+                    verdict: Verdict::Error,
+                    message: Some(format!(
+                        "Postgres adapter does not implement \
+                         CardinalityBetween on column {column:?} — use a \
+                         scan-path source (DuckDB / Parquet) for this \
+                         assertion in v0.1"
+                    )),
+                },
             };
             results.push(result);
         }

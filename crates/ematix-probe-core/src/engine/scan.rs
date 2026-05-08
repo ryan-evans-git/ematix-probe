@@ -149,6 +149,20 @@ enum Acc {
         /// through enough rows to matter.
         values: Vec<f64>,
     },
+    CardinalityI64 {
+        column: String,
+        col_idx: usize,
+        low: Option<i64>,
+        high: Option<i64>,
+        seen: HashSet<i64>,
+    },
+    CardinalityStr {
+        column: String,
+        col_idx: usize,
+        low: Option<i64>,
+        high: Option<i64>,
+        seen: HashSet<String>,
+    },
     /// Setup-time failure (missing column, unsupported type, or
     /// assertion not yet implemented for the scan path). Skips
     /// `update` and finalizes to `Verdict::Error`.
@@ -265,6 +279,42 @@ impl Acc {
                     low: *low,
                     high: *high,
                     count: 0,
+                }
+            }
+            Assertion::CardinalityBetween { column, low, high } => {
+                if low.is_none() && high.is_none() {
+                    return Acc::Error {
+                        message: format!(
+                            "scan-path cardinality_between on column {column:?}: \
+                             at least one of low / high must be set"
+                        ),
+                    };
+                }
+                match column_index(schema, column) {
+                    Ok(col_idx) => match schema.field(col_idx).data_type() {
+                        DataType::Int64 => Acc::CardinalityI64 {
+                            column: column.clone(),
+                            col_idx,
+                            low: *low,
+                            high: *high,
+                            seen: HashSet::new(),
+                        },
+                        DataType::Utf8 => Acc::CardinalityStr {
+                            column: column.clone(),
+                            col_idx,
+                            low: *low,
+                            high: *high,
+                            seen: HashSet::new(),
+                        },
+                        other => Acc::Error {
+                            message: format!(
+                                "scan-path cardinality_between on column {column:?}: \
+                                 unsupported Arrow type {other:?} (supported: \
+                                 Int64, Utf8)"
+                            ),
+                        },
+                    },
+                    Err(msg) => Acc::Error { message: msg },
                 }
             }
             Assertion::PercentileBetween {
@@ -470,6 +520,32 @@ impl Acc {
                     *self = Acc::Error { message: e };
                 }
             }
+            Acc::CardinalityI64 { col_idx, seen, .. } => {
+                let arr = batch
+                    .column(*col_idx)
+                    .as_any()
+                    .downcast_ref::<Int64Array>()
+                    .expect("CardinalityI64 requires Int64 column (validated at build)");
+                for i in 0..arr.len() {
+                    if arr.is_null(i) {
+                        continue;
+                    }
+                    seen.insert(arr.value(i));
+                }
+            }
+            Acc::CardinalityStr { col_idx, seen, .. } => {
+                let arr = batch
+                    .column(*col_idx)
+                    .as_any()
+                    .downcast_ref::<StringArray>()
+                    .expect("CardinalityStr requires Utf8 column (validated at build)");
+                for i in 0..arr.len() {
+                    if arr.is_null(i) {
+                        continue;
+                    }
+                    seen.insert(arr.value(i).to_owned());
+                }
+            }
             Acc::Freshness {
                 col_idx,
                 unit,
@@ -607,6 +683,20 @@ impl Acc {
                 }
                 pass(assertion_index)
             }
+            Acc::CardinalityI64 {
+                column,
+                low,
+                high,
+                seen,
+                ..
+            } => finalize_cardinality(assertion_index, &column, low, high, seen.len() as i64),
+            Acc::CardinalityStr {
+                column,
+                low,
+                high,
+                seen,
+                ..
+            } => finalize_cardinality(assertion_index, &column, low, high, seen.len() as i64),
             Acc::PercentileBetween {
                 column,
                 p,
@@ -722,6 +812,32 @@ fn fail(assertion_index: usize, msg: String) -> AssertionResult {
         verdict: Verdict::Fail,
         message: Some(msg),
     }
+}
+
+fn finalize_cardinality(
+    assertion_index: usize,
+    column: &str,
+    low: Option<i64>,
+    high: Option<i64>,
+    count: i64,
+) -> AssertionResult {
+    if let Some(lo) = low {
+        if count < lo {
+            return fail(
+                assertion_index,
+                format!("column {column:?} has {count} distinct value(s); expected at least {lo}"),
+            );
+        }
+    }
+    if let Some(hi) = high {
+        if count > hi {
+            return fail(
+                assertion_index,
+                format!("column {column:?} has {count} distinct value(s); expected at most {hi}"),
+            );
+        }
+    }
+    pass(assertion_index)
 }
 
 fn column_index(schema: &Schema, column: &str) -> Result<usize, String> {
