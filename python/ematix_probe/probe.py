@@ -33,6 +33,8 @@ from ematix_probe._core import (
     assertion_regex,
     assertion_row_count,
     assertion_unique,
+    run_duckdb_probe,
+    run_parquet_probe,
     run_postgres_probe,
 )
 
@@ -210,16 +212,20 @@ class DataProbe:
         """Execute the probe against the configured source. Sync;
         async support lands with the pytest plugin in Sprint 9.
         Only Postgres sources are wired in v0.1 Phase 1a."""
-        if self._source.kind != "postgres":
-            # DuckDB / Parquet adapters land in Phase 2; until then we
-            # error explicitly rather than silently no-op.
-            raise NotImplementedError(
-                f"source kind {self._source.kind!r} is not yet supported by "
-                f"DataProbe.run() in v0.1 Phase 1a"
-            )
-
         started_at = datetime.now(tz=timezone.utc)
-        raw = run_postgres_probe(self._source.url, self._plan)
+        kind = self._source.kind
+        if kind == "postgres":
+            raw = run_postgres_probe(self._source.url, self._plan)
+        elif kind == "duckdb":
+            raw = run_duckdb_probe(self._source.url, self._plan)
+        elif kind == "parquet":
+            raw = run_parquet_probe(self._source.url, self._plan)
+        else:
+            # S3 Parquet + future kinds land in later phases; until
+            # then, error explicitly rather than silently no-op.
+            raise NotImplementedError(
+                f"source kind {kind!r} is not yet supported by DataProbe.run()"
+            )
         finished_at = datetime.now(tz=timezone.utc)
 
         assertions = [

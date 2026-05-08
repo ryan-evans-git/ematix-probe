@@ -171,17 +171,17 @@ def test_to_rust_raises_on_unknown_kind():
         _to_rust(bogus)
 
 
-def test_data_probe_run_rejects_non_postgres_sources():
-    """Until DuckDB / Parquet adapters land in Phase 2, `.run()`
-    must raise NotImplementedError rather than silently no-op when
-    pointed at a non-Postgres source. Constructed via Source's
-    private constructor since the public factories all return
-    postgres sources today."""
-    duckdb_source = Source(kind="duckdb", url="duckdb:///tmp/x.db")
+def test_data_probe_run_rejects_unknown_source_kinds():
+    """`.run()` must raise NotImplementedError rather than silently
+    no-op when pointed at a source kind no adapter can handle.
+    Phase 2 added duckdb + parquet alongside postgres; future
+    kinds (e.g. s3 Parquet in Phase 3) must still error explicitly
+    until they are wired up."""
+    unknown = Source(kind="s3-parquet", url="s3://bucket/x.parquet")
 
-    @probe.data(source=duckdb_source, table="t")
+    @probe.data(source=unknown, table="t")
     def quality(t):
         t.column("x").not_null()
 
-    with pytest.raises(NotImplementedError, match="duckdb"):
+    with pytest.raises(NotImplementedError, match="s3-parquet"):
         quality.run()

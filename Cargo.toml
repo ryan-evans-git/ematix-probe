@@ -26,3 +26,25 @@ deadpool-postgres = "0.14"
 # testcontainers (dev-only) — Docker-backed Postgres for adapter
 # integration tests. CI runners on ubuntu-latest provide Docker.
 testcontainers-modules = { version = "0.11", features = ["postgres"] }
+# Apache Arrow — in-memory columnar batches that flow through the
+# Phase 2 scan path. Default features brings IPC/JSON/CSV which the
+# core only needs transitively; can be pruned later if build cost
+# becomes an issue (sprint-04 risk #2).
+arrow = "58"
+# Rust regex (RE2-flavored). Used by the scan-path evaluator to
+# back the `Regex` assertion. The Postgres adapter pushes regex
+# down via Postgres POSIX (`~`) instead — flavors are similar but
+# not identical (sprint-03 risk #1 documents the user-facing
+# implication; we don't reconcile flavors in v0.1).
+regex = "1"
+# DuckDB (in-process). `bundled` builds DuckDB from source, which
+# adds significant cold cargo build time (sprint-04 risk #2);
+# accepted because system DuckDB is too brittle for CI runners.
+duckdb = { version = "1", features = ["bundled"] }
+# Apache Parquet — file-format adapter (S-4.6). Pinned to the same
+# major as `arrow` so the RecordBatch types align without a casting
+# layer.
+parquet = "58"
+# Tempfile (dev-only) — used by Parquet adapter tests to seed files
+# in tmp dirs that auto-clean.
+tempfile = "3"

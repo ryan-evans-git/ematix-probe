@@ -1,9 +1,9 @@
 # Quickstart — all 7 assertions, JUnit + JSON reports
 
-End-to-end demo of `@probe.data`. Boots an ephemeral Postgres
-container, seeds a `users` table with intentional violations,
-runs a probe covering every v0.1 assertion, and writes
-`out/junit.xml` + `out/report.json`.
+End-to-end demo of `@probe.data`. Boots a backend (Postgres
+container, in-process DuckDB, or local Parquet), seeds a `users`
+table with intentional violations, runs a probe covering every
+v0.1 assertion, and writes `out/junit.xml` + `out/report.json`.
 
 ## Run it
 
@@ -15,12 +15,17 @@ python -m venv .venv && source .venv/bin/activate
 pip install -e '.[dev]'
 maturin develop --manifest-path crates/ematix-probe-py/Cargo.toml
 
-# Demo
+# Demo (default = postgres; needs Docker)
 python examples/quickstart/run.py
+
+# Or any of the Phase 2 scan-path backends — no Docker needed:
+python examples/quickstart/run.py --source duckdb
+python examples/quickstart/run.py --source parquet
 ```
 
-Requires Docker running locally (the container is started + torn
-down inside the script).
+`postgres` requires Docker running locally; `duckdb` and
+`parquet` are in-process and need nothing beyond the project's
+dev extras.
 
 ## What the probe checks
 

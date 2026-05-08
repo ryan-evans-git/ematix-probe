@@ -6,7 +6,11 @@
 //! (`run_postgres_probe`) that the Python-side `DataProbe.run`
 //! routes through.
 
+use std::path::PathBuf;
+
 use ematix_probe_core as core;
+use ematix_probe_core::adapters::data::duckdb::DuckDbAdapter;
+use ematix_probe_core::adapters::data::parquet::ParquetAdapter;
 use ematix_probe_core::adapters::data::postgres::PostgresAdapter;
 use ematix_probe_core::DataAdapter;
 use pyo3::exceptions::PyRuntimeError;
@@ -215,6 +219,66 @@ fn run_postgres_probe(py: Python<'_>, url: String, plan: &PyProbePlan) -> PyResu
         .map_err(|e| PyRuntimeError::new_err(e.to_string()))
 }
 
+/// Synchronous Python entry point for the in-process DuckDB adapter.
+/// `path` is the same value `source.duckdb(path)` carries — a
+/// filesystem path, or `:memory:` for a transient DB.
+#[pyfunction]
+fn run_duckdb_probe(py: Python<'_>, path: String, plan: &PyProbePlan) -> PyResult<PyRunReport> {
+    let core_plan = plan.inner.clone();
+    let summary = py.detach(move || -> Result<core::RunSummary, core::AdapterError> {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .map_err(|e| core::AdapterError::Connection(format!("tokio runtime: {e}")))?;
+        runtime.block_on(async move {
+            let adapter = DuckDbAdapter::open(&path)?;
+            adapter.execute(&core_plan).await
+        })
+    });
+    summary
+        .map(|inner| PyRunReport { inner })
+        .map_err(|e| PyRuntimeError::new_err(e.to_string()))
+}
+
+/// Helper for tests/examples to seed a DuckDB database via a SQL
+/// batch (DDL + DML). Not a regular `DataAdapter` operation; lives
+/// here so Python tests don't need a separate `duckdb` PyPI dep.
+#[pyfunction]
+fn duckdb_setup(py: Python<'_>, path: String, sql: String) -> PyResult<()> {
+    py.detach(move || -> Result<(), core::AdapterError> {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .map_err(|e| core::AdapterError::Connection(format!("tokio runtime: {e}")))?;
+        runtime.block_on(async move {
+            let adapter = DuckDbAdapter::open(&path)?;
+            adapter.execute_setup(&sql).await
+        })
+    })
+    .map_err(|e| PyRuntimeError::new_err(e.to_string()))
+}
+
+/// Synchronous Python entry point for the local-file Parquet
+/// adapter. `path` is the same value `source.parquet(path)`
+/// carries.
+#[pyfunction]
+fn run_parquet_probe(py: Python<'_>, path: String, plan: &PyProbePlan) -> PyResult<PyRunReport> {
+    let core_plan = plan.inner.clone();
+    let summary = py.detach(move || -> Result<core::RunSummary, core::AdapterError> {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .map_err(|e| core::AdapterError::Connection(format!("tokio runtime: {e}")))?;
+        runtime.block_on(async move {
+            let adapter = ParquetAdapter::open(&PathBuf::from(path))?;
+            adapter.execute(&core_plan).await
+        })
+    });
+    summary
+        .map(|inner| PyRunReport { inner })
+        .map_err(|e| PyRuntimeError::new_err(e.to_string()))
+}
+
 #[pyfunction]
 fn assertion_unique(column: String) -> PyAssertion {
     PyAssertion {
@@ -276,5 +340,8 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(assertion_enum, m)?)?;
     m.add_function(wrap_pyfunction!(assertion_row_count, m)?)?;
     m.add_function(wrap_pyfunction!(run_postgres_probe, m)?)?;
+    m.add_function(wrap_pyfunction!(run_duckdb_probe, m)?)?;
+    m.add_function(wrap_pyfunction!(run_parquet_probe, m)?)?;
+    m.add_function(wrap_pyfunction!(duckdb_setup, m)?)?;
     Ok(())
 }

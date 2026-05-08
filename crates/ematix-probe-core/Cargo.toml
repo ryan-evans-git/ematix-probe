@@ -13,8 +13,14 @@ async-trait = { workspace = true }
 thiserror = { workspace = true }
 tokio-postgres = { workspace = true }
 deadpool-postgres = { workspace = true }
+arrow = { workspace = true }
+regex = { workspace = true }
+duckdb = { workspace = true }
+parquet = { workspace = true }
+tokio = { workspace = true }
 
 [dev-dependencies]
 async-trait = { workspace = true }
 tokio = { workspace = true }
 testcontainers-modules = { workspace = true }
+tempfile = { workspace = true }

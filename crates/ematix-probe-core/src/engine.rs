@@ -3,3 +3,4 @@
 //! and VU pool for HTTP/SQL load probes.
 
 pub mod data;
+pub mod scan;
