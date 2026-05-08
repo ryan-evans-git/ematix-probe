@@ -18,12 +18,14 @@
 //!   without scanning a single row.
 
 use std::collections::HashSet;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use arrow::array::{
     Array, Float32Array, Float64Array, Int16Array, Int32Array, Int64Array, Int8Array, StringArray,
-    UInt16Array, UInt32Array, UInt64Array, UInt8Array,
+    TimestampMicrosecondArray, TimestampMillisecondArray, TimestampNanosecondArray,
+    TimestampSecondArray, UInt16Array, UInt32Array, UInt64Array, UInt8Array,
 };
-use arrow::datatypes::{DataType, Schema, SchemaRef};
+use arrow::datatypes::{DataType, Schema, SchemaRef, TimeUnit};
 use arrow::record_batch::RecordBatch;
 use async_trait::async_trait;
 use regex::Regex;
@@ -119,6 +121,20 @@ enum Acc {
         allowed: HashSet<String>,
         allowed_len: usize,
         miss_count: u64,
+    },
+    RowCount {
+        low: Option<i64>,
+        high: Option<i64>,
+        count: i64,
+    },
+    Freshness {
+        column: String,
+        col_idx: usize,
+        unit: TimeUnit,
+        within_seconds: i64,
+        /// Largest timestamp seen so far, in `unit`'s native units.
+        /// `None` until the first non-NULL value is observed.
+        max_value: Option<i64>,
     },
     /// Setup-time failure (missing column, unsupported type, or
     /// assertion not yet implemented for the scan path). Skips
@@ -224,9 +240,55 @@ impl Acc {
                     Err(msg) => Acc::Error { message: msg },
                 }
             }
-            // Other variants are scan-path TBD (S-4.4 row_count /
-            // freshness). Until then, return Error so the run still
-            // produces a Summary instead of panicking.
+            Assertion::RowCount { low, high } => {
+                if low.is_none() && high.is_none() {
+                    return Acc::Error {
+                        message: "scan-path row_count: at least one of low / high must be set \
+                                  (asserts nothing otherwise)"
+                            .into(),
+                    };
+                }
+                Acc::RowCount {
+                    low: *low,
+                    high: *high,
+                    count: 0,
+                }
+            }
+            Assertion::Freshness {
+                column,
+                within_seconds,
+            } => {
+                if *within_seconds < 0 {
+                    return Acc::Error {
+                        message: format!(
+                            "scan-path freshness on column {column:?}: \
+                             within_seconds is negative ({within_seconds})"
+                        ),
+                    };
+                }
+                match column_index(schema, column) {
+                    Ok(col_idx) => match schema.field(col_idx).data_type() {
+                        DataType::Timestamp(unit, _) => Acc::Freshness {
+                            column: column.clone(),
+                            col_idx,
+                            unit: *unit,
+                            within_seconds: *within_seconds,
+                            max_value: None,
+                        },
+                        other => Acc::Error {
+                            message: format!(
+                                "scan-path freshness on column {column:?}: \
+                                 unsupported Arrow type {other:?} (need Timestamp)"
+                            ),
+                        },
+                    },
+                    Err(msg) => Acc::Error { message: msg },
+                }
+            }
+            // Other variants land in later phases. Until then,
+            // return Error so the run still produces a Summary
+            // instead of panicking.
+            #[allow(unreachable_patterns)]
             other => Acc::Error {
                 message: format!("scan-path evaluator does not yet support {other:?}"),
             },
@@ -345,6 +407,40 @@ impl Acc {
                     }
                 }
             }
+            Acc::RowCount { count, .. } => {
+                *count += batch.num_rows() as i64;
+            }
+            Acc::Freshness {
+                col_idx,
+                unit,
+                max_value,
+                ..
+            } => {
+                let arr = batch.column(*col_idx);
+                let batch_max = match unit {
+                    TimeUnit::Second => {
+                        max_ts(arr.as_any().downcast_ref::<TimestampSecondArray>().unwrap())
+                    }
+                    TimeUnit::Millisecond => max_ts(
+                        arr.as_any()
+                            .downcast_ref::<TimestampMillisecondArray>()
+                            .unwrap(),
+                    ),
+                    TimeUnit::Microsecond => max_ts(
+                        arr.as_any()
+                            .downcast_ref::<TimestampMicrosecondArray>()
+                            .unwrap(),
+                    ),
+                    TimeUnit::Nanosecond => max_ts(
+                        arr.as_any()
+                            .downcast_ref::<TimestampNanosecondArray>()
+                            .unwrap(),
+                    ),
+                };
+                if let Some(b) = batch_max {
+                    *max_value = Some(max_value.map_or(b, |m| m.max(b)));
+                }
+            }
             Acc::Error { .. } => {}
         }
     }
@@ -432,12 +528,88 @@ impl Acc {
                     )
                 }
             }
+            Acc::RowCount { low, high, count } => {
+                if let Some(lo) = low {
+                    if count < lo {
+                        return fail(
+                            assertion_index,
+                            format!("table has {count} row(s); expected at least {lo}"),
+                        );
+                    }
+                }
+                if let Some(hi) = high {
+                    if count > hi {
+                        return fail(
+                            assertion_index,
+                            format!("table has {count} row(s); expected at most {hi}"),
+                        );
+                    }
+                }
+                pass(assertion_index)
+            }
+            Acc::Freshness {
+                column,
+                unit,
+                within_seconds,
+                max_value,
+                ..
+            } => match max_value {
+                None => fail(
+                    assertion_index,
+                    format!("column {column:?}: no rows; cannot evaluate freshness"),
+                ),
+                Some(max) => {
+                    let now_secs = SystemTime::now()
+                        .duration_since(UNIX_EPOCH)
+                        .map(|d| d.as_secs() as i64)
+                        .unwrap_or(0);
+                    let max_secs = ts_to_seconds(max, unit);
+                    let age = now_secs - max_secs;
+                    if age <= within_seconds {
+                        pass(assertion_index)
+                    } else {
+                        fail(
+                            assertion_index,
+                            format!(
+                                "column {column:?}: most recent value is {age}s old; \
+                                 expected within {within_seconds}s"
+                            ),
+                        )
+                    }
+                }
+            },
             Acc::Error { message } => AssertionResult {
                 assertion_index,
                 verdict: Verdict::Error,
                 message: Some(message),
             },
         }
+    }
+}
+
+/// Maximum non-NULL value in a typed timestamp array, or `None`
+/// if the array is empty/all-NULL.
+fn max_ts<T>(arr: &arrow::array::PrimitiveArray<T>) -> Option<i64>
+where
+    T: arrow::datatypes::ArrowPrimitiveType<Native = i64>,
+{
+    let mut m: Option<i64> = None;
+    for i in 0..arr.len() {
+        if arr.is_null(i) {
+            continue;
+        }
+        let v = arr.value(i);
+        m = Some(m.map_or(v, |cur| cur.max(v)));
+    }
+    m
+}
+
+fn ts_to_seconds(value: i64, unit: TimeUnit) -> i64 {
+    match unit {
+        TimeUnit::Second => value,
+        TimeUnit::Millisecond => value / 1_000,
+        TimeUnit::Microsecond => value / 1_000_000,
+        TimeUnit::Nanosecond => value / 1_000_000_000,
     }
 }
 
