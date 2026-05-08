@@ -7,6 +7,54 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Added — Phase 3 (Sprint 5, PI-1)
+
+- **Distribution assertions** — three new assertion variants
+  evaluable on the scan path (Postgres adapter returns
+  `Verdict::Error` with a "scan-path only — use DuckDB / Parquet"
+  message until a pushdown is justified):
+  - `Assertion::PercentileBetween { column, p, low, high }` —
+    `p ∈ [0.0, 1.0]`. Buffers non-NULL `f64`-cast values across
+    batches, sorts at finalize, picks `values[floor(p * (n-1))]`
+    (nearest-rank method). NULLs excluded; empty / all-NULL →
+    `Error`. Memory: O(non_null_count); t-digest streaming
+    deferred until a real workload pushes through enough rows
+    to matter.
+  - `Assertion::CardinalityBetween { column, low, high }` —
+    same `Option<i64>` bound shape as `RowCount`. HashSet
+    accumulation across batches; NULLs not counted (matches SQL
+    `COUNT(DISTINCT col)`). Supported column types: `Int64`,
+    `Utf8` (same set as `Unique`).
+  - `Assertion::SchemaMatch { fields }` — strict equality on
+    `(name, ArrowDataType)` tuples in order. Decided at
+    acc-build (the scanner schema is known the moment it's
+    opened), so empty-stream probes still produce a meaningful
+    Verdict. Nullability not checked (DuckDB / Parquet readers
+    often surface non-NULL columns as nullable).
+- **Streaming Parquet scanner** (S-5.4 refactor): drops the
+  S-4.6 eager `Vec<RecordBatch>` collect. The
+  `ParquetRecordBatchReader` lives in the scanner behind
+  `Arc<Mutex<Option<...>>>` so each `next_batch` does
+  `spawn_blocking { reader.next() }`. Memory profile:
+  O(row_group_size) instead of O(file).
+- **Cross-engine consistency property test**
+  (`tests/cross_engine_consistency.rs`): same seed data in
+  Postgres + DuckDB + Parquet, same `ProbePlan`, must produce
+  equal Verdicts. Two suites — 7-assertion "core" (all 3
+  engines must agree) + 3-assertion "scan-only" (DuckDB +
+  Parquet agree, Postgres Errors). Catches drift between
+  pushdown SQL and scan-path evaluators before user-visible
+  inconsistency ships.
+
+### Deferred — Phase 3 punt
+
+- **S3 Parquet adapter** (S-5.5 / S-5.6 / S-5.8 `--source s3`):
+  pushed to Sprint 6. Two reasonable paths (download-to-tempfile
+  with `aws-sdk-s3`, or streaming via `object_store` +
+  `ParquetObjectReader`) and the Sprint 5 cut needed to ship
+  before that decision matured. Tracked in sprint-05 retro and
+  sprint-06.
+
 ### Added — Phase 2 (Sprint 4, PI-1)
 
 - **Scan path** (`engine::scan`): pull-based `Scanner` trait
