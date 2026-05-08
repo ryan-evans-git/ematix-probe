@@ -41,3 +41,10 @@ regex = "1"
 # adds significant cold cargo build time (sprint-04 risk #2);
 # accepted because system DuckDB is too brittle for CI runners.
 duckdb = { version = "1", features = ["bundled"] }
+# Apache Parquet — file-format adapter (S-4.6). Pinned to the same
+# major as `arrow` so the RecordBatch types align without a casting
+# layer.
+parquet = "58"
+# Tempfile (dev-only) — used by Parquet adapter tests to seed files
+# in tmp dirs that auto-clean.
+tempfile = "3"
