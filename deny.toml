@@ -30,6 +30,13 @@ allow = [
     "Unlicense",
     "BSL-1.0",
     "MPL-2.0",
+    # Phase 2 (Sprint 4) additions:
+    # - CC0-1.0: public-domain dedication (tiny-keccak via const-random,
+    #   reached through the duckdb dep chain).
+    # - CDLA-Permissive-2.0: permissive data license (webpki-roots via
+    #   bollard via testcontainers).
+    "CC0-1.0",
+    "CDLA-Permissive-2.0",
 ]
 
 # Per-crate license overrides go here as `[[licenses.clarify]]`

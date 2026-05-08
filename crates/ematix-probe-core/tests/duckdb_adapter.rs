@@ -43,7 +43,9 @@ async fn duckdb_runs_passing_probe_via_scan_path() {
         Assertion::NotNull {
             column: "email".into(),
         },
-        Assertion::Unique { column: "id".into() },
+        Assertion::Unique {
+            column: "id".into(),
+        },
         Assertion::Between {
             column: "age".into(),
             low: 0.0,
@@ -70,7 +72,9 @@ async fn duckdb_surfaces_failures_per_assertion() {
         Assertion::NotNull {
             column: "email".into(),
         },
-        Assertion::Unique { column: "id".into() },
+        Assertion::Unique {
+            column: "id".into(),
+        },
         Assertion::Between {
             column: "age".into(),
             low: 0.0,
@@ -120,5 +124,8 @@ async fn duckdb_missing_table_yields_error() {
         column: "id".into(),
     }]);
     let result = a.execute(&p).await;
-    assert!(result.is_err(), "missing table should be a connect/query error, got: {result:?}");
+    assert!(
+        result.is_err(),
+        "missing table should be a connect/query error, got: {result:?}"
+    );
 }

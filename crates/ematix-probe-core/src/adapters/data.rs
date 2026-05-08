@@ -3,6 +3,7 @@
 //! Concrete adapters (`postgres`, `duckdb`, `parquet`) live in
 //! submodules and land per sprint per docs/PI_PLAN.md.
 
+pub mod duckdb;
 pub mod postgres;
 
 use crate::engine::data::{ProbePlan, RunSummary};

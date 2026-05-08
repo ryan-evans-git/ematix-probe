@@ -37,3 +37,7 @@ arrow = "58"
 # not identical (sprint-03 risk #1 documents the user-facing
 # implication; we don't reconcile flavors in v0.1).
 regex = "1"
+# DuckDB (in-process). `bundled` builds DuckDB from source, which
+# adds significant cold cargo build time (sprint-04 risk #2);
+# accepted because system DuckDB is too brittle for CI runners.
+duckdb = { version = "1", features = ["bundled"] }
