@@ -78,7 +78,9 @@ async fn parquet_runs_passing_probe() {
         Assertion::NotNull {
             column: "email".into(),
         },
-        Assertion::Unique { column: "id".into() },
+        Assertion::Unique {
+            column: "id".into(),
+        },
         Assertion::Between {
             column: "age".into(),
             low: 0.0,
@@ -117,7 +119,9 @@ async fn parquet_surfaces_failures() {
         Assertion::NotNull {
             column: "email".into(),
         },
-        Assertion::Unique { column: "id".into() },
+        Assertion::Unique {
+            column: "id".into(),
+        },
         Assertion::Between {
             column: "age".into(),
             low: 0.0,
@@ -137,5 +141,6 @@ async fn parquet_missing_file_yields_open_error() {
     let dir = TempDir::new().unwrap();
     let path = dir.path().join("does-not-exist.parquet");
     let result = ParquetAdapter::open(&path);
-    assert!(result.is_err(), "missing file should error: {result:?}");
+    assert!(result.is_err(), "missing file should error; got Ok");
+    drop(result);
 }
