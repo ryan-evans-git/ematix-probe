@@ -4,3 +4,4 @@
 //! Postgres SQL load drivers in Phases 4-5.
 
 pub mod data;
+pub mod load;

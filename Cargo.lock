@@ -1008,6 +1008,7 @@ dependencies = [
  "object_store",
  "parquet",
  "regex",
+ "reqwest",
  "tempfile",
  "testcontainers-modules",
  "thiserror",
