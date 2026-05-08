@@ -115,6 +115,56 @@ implications:
    story to the sprint file before doing the work** (even
    retroactively in the same PR).
 
+## 2026-05-08 — DuckDB `:memory:` is per-connection, not per-process `rust` `tooling`
+
+Building `DuckDbAdapter` in S-4.5, the first design opened a fresh
+`Connection` inside every `execute` (matched the Postgres adapter
+pattern, where every execute pulls from a shared pool of
+short-lived clients). Tests against `:memory:` failed immediately
+with `Catalog Error: Table with name users does not exist`, even
+though `execute_setup` had just created it.
+
+Cause: each `:memory:` `Connection::open` is a *new* in-memory
+database. The setup created the table in DB #1; the execute looked
+in DB #2. File-backed databases would behave the same way for
+in-memory state (DuckDB doesn't have a connection pool with shared
+cache like SQLite's `mode=memory&cache=shared`).
+
+Fix: hold one `Arc<Mutex<Connection>>` for the adapter's lifetime;
+all `execute_setup` + `execute` calls lock and reuse it. Per-call
+serialization on the mutex is fine for v0.1 (data probes are not
+the hot path).
+
+Pattern: when an in-process embedded DB has a `:memory:` mode,
+**check whether it's per-connection or per-process before designing
+the adapter's connection lifecycle.** The right shape is usually a
+long-lived single connection (or an explicit shared-cache
+mechanism if the lib supports it), not the pool-of-fresh-clients
+pattern that fits networked servers.
+
+## 2026-05-08 — `cargo deny` runs over the full lock, so any bump can surface old licenses `rust` `ci` `tooling`
+
+Adding `duckdb` in S-4.5 caused `cargo deny check licenses` to
+fail on **two licenses that had nothing to do with duckdb**:
+
+- `CC0-1.0` (`tiny-keccak` via the duckdb dep chain — fair game,
+  this WAS new)
+- `CDLA-Permissive-2.0` (`webpki-roots` via `bollard` via
+  `testcontainers` — already in the closure since Sprint 2)
+
+Why CDLA fired now: adding duckdb caused Cargo.lock churn, which
+re-resolved transitives, and `webpki-roots` got bumped to a
+version that re-declared its license SPDX field with the new
+identifier. The license hadn't changed; the declaration had.
+
+Pattern: when a Sprint introduces a new dep, **run `cargo deny
+check licenses` before assuming the only new licenses to allow are
+the ones you can trace to your new direct dep.** Walk the failure
+list; some entries will be old transitives that just got
+re-declared. Both are still safe to add — both `CC0-1.0` and
+`CDLA-Permissive-2.0` are permissive — but the diagnosis matters
+for the audit trail in `deny.toml`'s comments.
+
 ## 2026-05-06 — Pin the test Postgres version; PG 14 changed `EXTRACT` return type `tdd` `tooling` `rust`
 
 The freshness adapter (`SELECT EXTRACT(EPOCH FROM (now() - MAX(<col>))) FROM <t>`)

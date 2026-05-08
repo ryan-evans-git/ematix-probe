@@ -7,6 +7,61 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Added — Phase 2 (Sprint 4, PI-1)
+
+- **Scan path** (`engine::scan`): pull-based `Scanner` trait
+  yielding Arrow `RecordBatch`es + a shared `evaluate(plan,
+  scanner)` that runs every v0.1 assertion (`not_null`, `unique`,
+  `between`, `regex`, `enum`, `row_count`, `freshness`) against
+  the stream. Same `Verdict`/message contract as the Postgres
+  pushdown adapter from Sprints 2–3.
+  - Per-assertion accumulators built up-front from the scanner's
+    schema, so missing-column and unsupported-type errors surface
+    without scanning a row.
+  - `unique` HashSets keyed on `i64` / `String`; `between` casts
+    Int8/16/32/64 + UInt8/16/32/64 + Float32/64 to f64; `regex`
+    via the `regex` crate (RE2-flavored, differs subtly from
+    Postgres POSIX); `freshness` tracks MAX across batches in the
+    column's native Arrow `TimeUnit` and compares against
+    `SystemTime::now()` at finalize.
+  - `reduce_verdict` lifted from `adapters::data::postgres`
+    (`pub(crate)`) to `engine::data` (`pub`) so the scan path
+    shares it.
+- **`DuckDbAdapter`** (`adapters::data::duckdb`): in-process
+  DuckDB via the `duckdb` crate (`bundled` feature). Holds one
+  `Arc<Mutex<Connection>>` for the adapter's lifetime so
+  `:memory:` databases persist across `execute_setup` +
+  `execute`. All sync DB calls run inside
+  `tokio::task::spawn_blocking`. Per-`execute`: `SELECT * FROM
+  <qualified_table>` → eager-collect into `Vec<RecordBatch>` →
+  scan-path evaluator.
+- **`ParquetAdapter`** (`adapters::data::parquet`): local Parquet
+  files via the `parquet` crate. Eager-loads via
+  `ParquetRecordBatchReaderBuilder`. The Parquet file *is* the
+  table — `ProbePlan::table` / `schema` are ignored.
+- **Python source factories**: `source.duckdb(path)` and
+  `source.parquet(path)` join `source.postgres(url)`.
+  `source.parquet` rejects `s3://` URLs explicitly (Phase 3).
+- **pyo3 entry points**: `run_duckdb_probe`, `run_parquet_probe`,
+  and `duckdb_setup` (test/example seeding helper). `DataProbe.
+  run()` now dispatches on `source.kind`.
+- **Quickstart `--source` flag**: `python examples/quickstart/
+  run.py --source {postgres,duckdb,parquet}`. The two scan-path
+  backends need no Docker; the parquet variant has DuckDB write
+  the file via `COPY TO`.
+- **License allow-list**: added `CC0-1.0` (`tiny-keccak` via
+  duckdb chain) and `CDLA-Permissive-2.0` (`webpki-roots` via
+  testcontainers/bollard) to `deny.toml`.
+
+### Test surface — Phase 2
+
+- Rust: 24 new scan-path + adapter tests (3 trait basics + 6/7/10
+  evaluator coverage + 4 DuckDB + 3 Parquet — 40 total
+  non-Docker green; postgres tests skip locally without Docker
+  but run on CI).
+- Python: 9 new tests (6 source builders, 3 e2e duckdb/parquet —
+  no Docker needed for any of them). 67 total Python tests green.
+
 ### Added — Phase 1b (Sprint 3, PI-1)
 
 - **Extended assertion vocabulary**: `regex`, `enum`, `row_count`,
