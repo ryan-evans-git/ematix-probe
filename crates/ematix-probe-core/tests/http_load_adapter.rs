@@ -106,7 +106,10 @@ async fn surfaces_5xx_status_codes() {
     assert!(!samples.is_empty());
     for s in &samples {
         assert_eq!(s.status_code, Some(503));
-        assert!(s.error.is_none(), "5xx is a successful round-trip; status carries the failure");
+        assert!(
+            s.error.is_none(),
+            "5xx is a successful round-trip; status carries the failure"
+        );
     }
 }
 
@@ -123,7 +126,10 @@ async fn unreachable_target_yields_error_samples() {
     let adapter = HttpLoadAdapter::new();
     let samples = adapter.collect_samples(&plan).await.expect("collect");
 
-    assert!(!samples.is_empty(), "unreachable target should still emit samples");
+    assert!(
+        !samples.is_empty(),
+        "unreachable target should still emit samples"
+    );
     for s in &samples {
         assert!(s.status_code.is_none(), "no status on connection failure");
         assert!(s.error.is_some(), "expected error message");
