@@ -136,6 +136,40 @@ enum Acc {
         /// `None` until the first non-NULL value is observed.
         max_value: Option<i64>,
     },
+    PercentileBetween {
+        column: String,
+        col_idx: usize,
+        p: f64,
+        low: f64,
+        high: f64,
+        /// Buffered non-NULL values across all batches. Sorted at
+        /// finalize time. v0.1 trade-off: O(n) memory in service of
+        /// implementation simplicity. Streaming approximations
+        /// (t-digest etc.) deferred until a real workload pushes
+        /// through enough rows to matter.
+        values: Vec<f64>,
+    },
+    CardinalityI64 {
+        column: String,
+        col_idx: usize,
+        low: Option<i64>,
+        high: Option<i64>,
+        seen: HashSet<i64>,
+    },
+    CardinalityStr {
+        column: String,
+        col_idx: usize,
+        low: Option<i64>,
+        high: Option<i64>,
+        seen: HashSet<String>,
+    },
+    /// Schema check: terminal at acc-build (no per-batch state).
+    /// Verdict + message are computed up-front from the scanner's
+    /// schema and just round-tripped at finalize.
+    SchemaMatch {
+        verdict: Verdict,
+        message: Option<String>,
+    },
     /// Setup-time failure (missing column, unsupported type, or
     /// assertion not yet implemented for the scan path). Skips
     /// `update` and finalizes to `Verdict::Error`.
@@ -252,6 +286,134 @@ impl Acc {
                     low: *low,
                     high: *high,
                     count: 0,
+                }
+            }
+            Assertion::SchemaMatch { fields } => {
+                if fields.is_empty() {
+                    return Acc::Error {
+                        message: "scan-path schema_match: fields list is empty \
+                                  (asserts nothing)"
+                            .into(),
+                    };
+                }
+                let actual: Vec<(&str, &DataType)> = schema
+                    .fields()
+                    .iter()
+                    .map(|f| (f.name().as_str(), f.data_type()))
+                    .collect();
+                if actual.len() != fields.len() {
+                    return Acc::SchemaMatch {
+                        verdict: Verdict::Fail,
+                        message: Some(format!(
+                            "schema_match: expected {} field(s), got {} \
+                             (expected: {:?}, actual: {:?})",
+                            fields.len(),
+                            actual.len(),
+                            field_names(fields.iter().map(|(n, _)| n.as_str())),
+                            field_names(actual.iter().map(|(n, _)| *n)),
+                        )),
+                    };
+                }
+                for (i, ((exp_name, exp_type), (act_name, act_type))) in
+                    fields.iter().zip(actual.iter()).enumerate()
+                {
+                    if exp_name != act_name {
+                        return Acc::SchemaMatch {
+                            verdict: Verdict::Fail,
+                            message: Some(format!(
+                                "schema_match: field {i}: expected name {exp_name:?}, \
+                                 got {act_name:?}"
+                            )),
+                        };
+                    }
+                    if exp_type != *act_type {
+                        return Acc::SchemaMatch {
+                            verdict: Verdict::Fail,
+                            message: Some(format!(
+                                "schema_match: field {exp_name:?}: expected type \
+                                 {exp_type:?}, got {act_type:?}"
+                            )),
+                        };
+                    }
+                }
+                Acc::SchemaMatch {
+                    verdict: Verdict::Pass,
+                    message: None,
+                }
+            }
+            Assertion::CardinalityBetween { column, low, high } => {
+                if low.is_none() && high.is_none() {
+                    return Acc::Error {
+                        message: format!(
+                            "scan-path cardinality_between on column {column:?}: \
+                             at least one of low / high must be set"
+                        ),
+                    };
+                }
+                match column_index(schema, column) {
+                    Ok(col_idx) => match schema.field(col_idx).data_type() {
+                        DataType::Int64 => Acc::CardinalityI64 {
+                            column: column.clone(),
+                            col_idx,
+                            low: *low,
+                            high: *high,
+                            seen: HashSet::new(),
+                        },
+                        DataType::Utf8 => Acc::CardinalityStr {
+                            column: column.clone(),
+                            col_idx,
+                            low: *low,
+                            high: *high,
+                            seen: HashSet::new(),
+                        },
+                        other => Acc::Error {
+                            message: format!(
+                                "scan-path cardinality_between on column {column:?}: \
+                                 unsupported Arrow type {other:?} (supported: \
+                                 Int64, Utf8)"
+                            ),
+                        },
+                    },
+                    Err(msg) => Acc::Error { message: msg },
+                }
+            }
+            Assertion::PercentileBetween {
+                column,
+                p,
+                low,
+                high,
+            } => {
+                if !p.is_finite() || !(0.0..=1.0).contains(p) {
+                    return Acc::Error {
+                        message: format!(
+                            "scan-path percentile_between on column {column:?}: \
+                             p must be in [0.0, 1.0] (got {p})"
+                        ),
+                    };
+                }
+                match column_index(schema, column) {
+                    Ok(col_idx) => {
+                        // Reuse `between`'s supported-numeric set.
+                        if !is_supported_numeric(schema.field(col_idx).data_type()) {
+                            Acc::Error {
+                                message: format!(
+                                    "scan-path percentile_between on column {column:?}: \
+                                     unsupported Arrow type {:?} (need a numeric type)",
+                                    schema.field(col_idx).data_type()
+                                ),
+                            }
+                        } else {
+                            Acc::PercentileBetween {
+                                column: column.clone(),
+                                col_idx,
+                                p: *p,
+                                low: *low,
+                                high: *high,
+                                values: Vec::new(),
+                            }
+                        }
+                    }
+                    Err(msg) => Acc::Error { message: msg },
                 }
             }
             Assertion::Freshness {
@@ -410,6 +572,43 @@ impl Acc {
             Acc::RowCount { count, .. } => {
                 *count += batch.num_rows() as i64;
             }
+            Acc::PercentileBetween {
+                col_idx, values, ..
+            } => {
+                let arr = batch.column(*col_idx);
+                if let Err(e) = collect_numeric_into(arr.as_ref(), values) {
+                    *self = Acc::Error { message: e };
+                }
+            }
+            Acc::SchemaMatch { .. } => {
+                // No per-batch state; verdict was decided at build.
+            }
+            Acc::CardinalityI64 { col_idx, seen, .. } => {
+                let arr = batch
+                    .column(*col_idx)
+                    .as_any()
+                    .downcast_ref::<Int64Array>()
+                    .expect("CardinalityI64 requires Int64 column (validated at build)");
+                for i in 0..arr.len() {
+                    if arr.is_null(i) {
+                        continue;
+                    }
+                    seen.insert(arr.value(i));
+                }
+            }
+            Acc::CardinalityStr { col_idx, seen, .. } => {
+                let arr = batch
+                    .column(*col_idx)
+                    .as_any()
+                    .downcast_ref::<StringArray>()
+                    .expect("CardinalityStr requires Utf8 column (validated at build)");
+                for i in 0..arr.len() {
+                    if arr.is_null(i) {
+                        continue;
+                    }
+                    seen.insert(arr.value(i).to_owned());
+                }
+            }
             Acc::Freshness {
                 col_idx,
                 unit,
@@ -547,6 +746,60 @@ impl Acc {
                 }
                 pass(assertion_index)
             }
+            Acc::SchemaMatch { verdict, message } => AssertionResult {
+                assertion_index,
+                verdict,
+                message,
+            },
+            Acc::CardinalityI64 {
+                column,
+                low,
+                high,
+                seen,
+                ..
+            } => finalize_cardinality(assertion_index, &column, low, high, seen.len() as i64),
+            Acc::CardinalityStr {
+                column,
+                low,
+                high,
+                seen,
+                ..
+            } => finalize_cardinality(assertion_index, &column, low, high, seen.len() as i64),
+            Acc::PercentileBetween {
+                column,
+                p,
+                low,
+                high,
+                mut values,
+                ..
+            } => {
+                if values.is_empty() {
+                    return AssertionResult {
+                        assertion_index,
+                        verdict: Verdict::Error,
+                        message: Some(format!(
+                            "column {column:?}: no non-NULL values; \
+                             cannot evaluate percentile"
+                        )),
+                    };
+                }
+                // Nearest-rank: idx = floor(p * (n - 1)).
+                values.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+                let n = values.len();
+                let idx = (p * (n as f64 - 1.0)).floor() as usize;
+                let v = values[idx];
+                if v >= low && v <= high {
+                    pass(assertion_index)
+                } else {
+                    fail(
+                        assertion_index,
+                        format!(
+                            "column {column:?}: P{:.0} = {v} is outside [{low}, {high}]",
+                            p * 100.0
+                        ),
+                    )
+                }
+            }
             Acc::Freshness {
                 column,
                 unit,
@@ -629,11 +882,101 @@ fn fail(assertion_index: usize, msg: String) -> AssertionResult {
     }
 }
 
+fn finalize_cardinality(
+    assertion_index: usize,
+    column: &str,
+    low: Option<i64>,
+    high: Option<i64>,
+    count: i64,
+) -> AssertionResult {
+    if let Some(lo) = low {
+        if count < lo {
+            return fail(
+                assertion_index,
+                format!("column {column:?} has {count} distinct value(s); expected at least {lo}"),
+            );
+        }
+    }
+    if let Some(hi) = high {
+        if count > hi {
+            return fail(
+                assertion_index,
+                format!("column {column:?} has {count} distinct value(s); expected at most {hi}"),
+            );
+        }
+    }
+    pass(assertion_index)
+}
+
+/// Pretty-print a sequence of field names for a SchemaMatch
+/// failure message. Just collects into a Vec<&str> so the
+/// `Debug` impl on Vec gives `["id", "email"]`.
+fn field_names<'a, I: IntoIterator<Item = &'a str>>(names: I) -> Vec<&'a str> {
+    names.into_iter().collect()
+}
+
 fn column_index(schema: &Schema, column: &str) -> Result<usize, String> {
     schema.index_of(column).map_err(|_| {
         let names: Vec<&str> = schema.fields().iter().map(|f| f.name().as_str()).collect();
         format!("column {column:?} not found in scanner schema (available: {names:?})")
     })
+}
+
+/// True for the numeric Arrow types `between` + `percentile_between`
+/// know how to handle. Kept in lockstep with the `count_oob` and
+/// `collect_numeric_into` match arms below.
+fn is_supported_numeric(dt: &DataType) -> bool {
+    matches!(
+        dt,
+        DataType::Int8
+            | DataType::Int16
+            | DataType::Int32
+            | DataType::Int64
+            | DataType::UInt8
+            | DataType::UInt16
+            | DataType::UInt32
+            | DataType::UInt64
+            | DataType::Float32
+            | DataType::Float64
+    )
+}
+
+/// Append every non-NULL value in `arr` (cast to f64) into `out`.
+/// Returns Err with a diagnostic if `arr`'s type is not in the
+/// supported numeric set — caller promotes to `Acc::Error`.
+fn collect_numeric_into(arr: &dyn Array, out: &mut Vec<f64>) -> Result<(), String> {
+    macro_rules! collect_typed {
+        ($ty:ty) => {{
+            let typed = arr
+                .as_any()
+                .downcast_ref::<$ty>()
+                .expect("downcast matched data_type");
+            for i in 0..typed.len() {
+                if typed.is_null(i) {
+                    continue;
+                }
+                out.push(typed.value(i) as f64);
+            }
+        }};
+    }
+    match arr.data_type() {
+        DataType::Int8 => collect_typed!(Int8Array),
+        DataType::Int16 => collect_typed!(Int16Array),
+        DataType::Int32 => collect_typed!(Int32Array),
+        DataType::Int64 => collect_typed!(Int64Array),
+        DataType::UInt8 => collect_typed!(UInt8Array),
+        DataType::UInt16 => collect_typed!(UInt16Array),
+        DataType::UInt32 => collect_typed!(UInt32Array),
+        DataType::UInt64 => collect_typed!(UInt64Array),
+        DataType::Float32 => collect_typed!(Float32Array),
+        DataType::Float64 => collect_typed!(Float64Array),
+        other => {
+            return Err(format!(
+                "scan-path numeric collection: unsupported Arrow type {other:?}"
+            ));
+        }
+    }
+    Ok(())
 }
 
 /// Count out-of-range values in a numeric Arrow array. Skips NULLs.

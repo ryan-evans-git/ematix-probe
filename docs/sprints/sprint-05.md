@@ -3,7 +3,7 @@
 Dates: 2026-05-21 → 2026-05-27
 PI: PI-1
 Phase: Phase 3
-Status: **planned** *(opens once PR for `phase-2` from Sprint 4 merges)*
+Status: **closed** — 5/8 stories shipped on `phase-3`; S3 work deferred to Sprint 6 (see retro below)
 
 ## Goal
 
@@ -46,29 +46,30 @@ End of sprint:
 Each story RED → GREEN → REFACTOR per [PROCESS.md §5](../PROCESS.md).
 Stories sketched in outline; flesh out at sprint kickoff.
 
-- [ ] **S-5.1 — `Assertion::PercentileBetween`** (scan-path eval)
-- [ ] **S-5.2 — `Assertion::CardinalityBetween`** (scan-path eval)
-- [ ] **S-5.3 — `Assertion::SchemaMatch`** (scan-path eval)
-- [ ] **S-5.4 — Streaming Parquet scanner** (drop the eager Vec
+- [x] **S-5.1 — `Assertion::PercentileBetween`** (scan-path eval)
+- [x] **S-5.2 — `Assertion::CardinalityBetween`** (scan-path eval)
+- [x] **S-5.3 — `Assertion::SchemaMatch`** (scan-path eval)
+- [x] **S-5.4 — Streaming Parquet scanner** (drop the eager Vec
        collect from S-4.6 in favor of a per-row-group iterator)
 - [ ] **S-5.5 — `S3ParquetAdapter`** (local-file Parquet adapter
        refactored to take a `Read + Seek` source; S3 is a
        `tokio` + `aws-sdk-s3` GET wrapped to satisfy that)
 - [ ] **S-5.6 — Python `source.s3_parquet(bucket, key, region=)`**
-- [ ] **S-5.7 — Cross-engine consistency property test**
-- [ ] **S-5.8 — Quickstart `--source s3` (LocalStack) + sprint
-       close**
+- [x] **S-5.7 — Cross-engine consistency property test**
+- [x] **S-5.8 — Sprint close (CHANGELOG / retro / learnings /
+       sprint-06 stub).** The `--source s3` half deferred with
+       S-5.5 / S-5.6.
 
 ## Definition of Done
 
-- [ ] All Sprint 5 tests green in CI
-- [ ] All Phase 0 / 1a / 1b / 2 gates still green
-- [ ] CI workflow green on the sprint branch
+- [x] All Sprint 5 tests green in CI
+- [x] All Phase 0 / 1a / 1b / 2 gates still green
+- [x] CI workflow green on the sprint branch
 - [ ] PR opened and merged into `main`
-- [ ] CHANGELOG entry under `## [Unreleased]` for Phase 3
+- [x] CHANGELOG entry under `## [Unreleased]` for Phase 3
 - [ ] Quickstart runs end-to-end against `s3` mode (LocalStack)
-- [ ] Cross-engine property test green on all 4 source kinds
-- [ ] Retro filled below
+- [x] Cross-engine property test green on all 3 implemented source kinds (postgres + duckdb + parquet; s3 deferred to S6)
+- [x] Retro filled below
 
 ## Out of scope (deferred)
 
@@ -102,16 +103,64 @@ Stories sketched in outline; flesh out at sprint kickoff.
 ## Retro (filled at sprint close)
 
 ### Kept
--
+- The "scan-path Acc enum" pattern from Sprint 4 absorbed the
+  three new distribution assertions cleanly: each was an Acc
+  variant + build/update/finalize arm, no engine refactor.
+- For PercentileBetween + CardinalityBetween, the sprint plan
+  said "scan-path-only — Postgres returns Error". That contract
+  surfaced as a positive — the property test (S-5.7) now
+  *asserts* Postgres errors on the scan-only assertions, locking
+  the v0.1 split in.
+- Sprint-04 retro called out "no cross-engine consistency test
+  yet" as Dropped. Sprint 5 closed it with S-5.7. Worth carrying
+  forward: every time we add a multi-adapter assertion, the
+  property test should grow with it.
 
 ### Improved
--
+- Extracted two helpers (`is_supported_numeric`,
+  `collect_numeric_into`) when adding PercentileBetween — both
+  now back `between` and `percentile_between`. Recognized the
+  shape during S-5.1 GREEN rather than after, so the dedupe
+  happened at the right time.
+- For SchemaMatch, decided NOT to check nullability in v0.1.
+  Documented at acc-build with a one-liner instead of leaving
+  the absence implicit. Saves a future "should this be a bug?"
+  conversation.
 
 ### Dropped
--
+- **S-5.5 (S3ParquetAdapter), S-5.6 (Python source.s3_parquet),
+  and the `--source s3` half of S-5.8.** Two reasonable
+  implementation paths surfaced — `aws-sdk-s3` download-to-
+  tempfile vs. streaming via `object_store` +
+  `ParquetObjectReader` — and committing to either inside Sprint
+  5 would have meant either skipping the property test or
+  shipping a half-built S3 path. Pushed to Sprint 6, where it
+  can lead the sprint and the right approach can be picked
+  carefully.
+- Per-bound validation on PercentileBetween's `low`/`high`. The
+  spec rejects `p` out of `[0, 1]` but does NOT validate `low <=
+  high` — a degenerate range just always-fails. Symmetrical with
+  Between (which also doesn't pre-validate). Flagged in case a
+  future ask wants stricter input checking.
 
 ### Learned
--
+- See LEARNINGS entry: per-acc-variant initialization that
+  composes `Acc::SomeError { ... }.with_check(...)` reads nicely
+  but doesn't compose with stored `AssertionResult` until
+  `assertion_index` is known at finalize. Solved by storing
+  `(verdict, message)` pre-computed in the Acc variant and
+  wrapping at finalize. Generalizable: terminal Acc variants
+  decided at build time should store their decision as raw
+  fields, not a pre-baked `AssertionResult`.
+- Sprint sizing: 8 stories was too many when one of them (S-5.5)
+  has high architectural ambiguity. Sprint plans should keep at
+  most one "research-needed" story per sprint, or front-load the
+  research as its own story.
 
 ### Drift?
--
+- Yes — the S3 deferral shifts work from Sprint 5 → Sprint 6.
+  Documented openly in the closed sprint file + the new sprint
+  file rather than silently moving the goalposts. Sprint 6 (now
+  open) absorbs S-5.5 + S-5.6 as its lead stories, plus the
+  originally-planned Phase 4a load-probe MVP. May need to spill
+  to Sprint 7 if both don't fit; tracked in sprint-06.

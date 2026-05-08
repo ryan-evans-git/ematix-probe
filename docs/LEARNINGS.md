@@ -115,6 +115,28 @@ implications:
    story to the sprint file before doing the work** (even
    retroactively in the same PR).
 
+## 2026-05-08 — Terminal-at-build Acc variants store raw verdict, not pre-baked `AssertionResult` `architecture` `rust`
+
+In S-5.3 (SchemaMatch) the schema check is fully decided at
+acc-build time — there's no per-batch state to accumulate. The
+first cut tried to store the result as
+`SchemaMatch { result: AssertionResult }` and just round-trip it
+at finalize. That broke immediately: `AssertionResult` carries
+`assertion_index`, which isn't known until finalize iterates with
+`.enumerate()`.
+
+Fix: store `(verdict, message)` as raw fields in the Acc variant;
+finalize wraps with the index it's given.
+
+Pattern for any future terminal-at-build Acc variant: store the
+*decision* (verdict + message), not the *report* (which needs an
+index). The index is the engine's responsibility, not the
+accumulator's.
+
+Trivial in retrospect, but it's the kind of plumbing decision
+that's worth writing down because the next "this assertion has
+no per-batch state" variant will hit the same temptation.
+
 ## 2026-05-08 — DuckDB `:memory:` is per-connection, not per-process `rust` `tooling`
 
 Building `DuckDbAdapter` in S-4.5, the first design opened a fresh

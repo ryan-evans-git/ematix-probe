@@ -97,6 +97,39 @@ impl DataAdapter for PostgresAdapter {
                     self.run_freshness(plan, idx, column, *within_seconds)
                         .await?
                 }
+                // Scan-path-only assertions: Postgres has no clean
+                // pushdown for percentile (would need percentile_cont
+                // + a window). Defer until a real ask.
+                Assertion::PercentileBetween { column, .. } => AssertionResult {
+                    assertion_index: idx,
+                    verdict: Verdict::Error,
+                    message: Some(format!(
+                        "Postgres adapter does not implement \
+                         PercentileBetween on column {column:?} — use a \
+                         scan-path source (DuckDB / Parquet) for this \
+                         assertion in v0.1"
+                    )),
+                },
+                Assertion::CardinalityBetween { column, .. } => AssertionResult {
+                    assertion_index: idx,
+                    verdict: Verdict::Error,
+                    message: Some(format!(
+                        "Postgres adapter does not implement \
+                         CardinalityBetween on column {column:?} — use a \
+                         scan-path source (DuckDB / Parquet) for this \
+                         assertion in v0.1"
+                    )),
+                },
+                Assertion::SchemaMatch { .. } => AssertionResult {
+                    assertion_index: idx,
+                    verdict: Verdict::Error,
+                    message: Some(
+                        "Postgres adapter does not implement SchemaMatch \
+                         — use a scan-path source (DuckDB / Parquet) for \
+                         this assertion in v0.1"
+                            .into(),
+                    ),
+                },
             };
             results.push(result);
         }

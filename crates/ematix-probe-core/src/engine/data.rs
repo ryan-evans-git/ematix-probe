@@ -69,6 +69,40 @@ pub enum Assertion {
     /// time. The Python side parses duration strings like
     /// `"24h"` / `"6h"` / `"30m"` into seconds.
     Freshness { column: String, within_seconds: i64 },
+    /// The `p`-th percentile of the (non-NULL) values in `column`
+    /// must lie in `[low, high]` inclusive. `p ∈ [0.0, 1.0]`.
+    /// Scan-path only in v0.1 — pushdown adapters (Postgres) return
+    /// `Verdict::Error` with a "scan-path only" message until a
+    /// future story justifies a `percentile_cont` translation.
+    /// Empty / all-NULL columns produce `Error` ("not enough data").
+    PercentileBetween {
+        column: String,
+        p: f64,
+        low: f64,
+        high: f64,
+    },
+    /// Distinct-value count in `column` (NULLs excluded) must lie
+    /// in `[low, high]`, where either bound may be `None` for
+    /// "unbounded on that side". Same `Option<i64>` shape as
+    /// `RowCount`. Both `None` is rejected at adapter time.
+    /// Scan-path only in v0.1 — Postgres pushdown via `count(distinct
+    /// col)` is straightforward but waits on a real ask.
+    CardinalityBetween {
+        column: String,
+        low: Option<i64>,
+        high: Option<i64>,
+    },
+    /// Strict equality check on the source schema: same field
+    /// names, same Arrow `DataType`s, same order. Nullability
+    /// deliberately not checked in v0.1 (DuckDB/Parquet readers
+    /// often surface columns as nullable even when source data
+    /// has no NULLs). Empty `fields` list rejected at adapter
+    /// time. Scan-path only in v0.1 — pushing this down to
+    /// Postgres would require an information_schema query, which
+    /// is doable but waits on a real ask.
+    SchemaMatch {
+        fields: Vec<(String, arrow::datatypes::DataType)>,
+    },
 }
 
 /// A complete probe execution plan: which table to probe + the

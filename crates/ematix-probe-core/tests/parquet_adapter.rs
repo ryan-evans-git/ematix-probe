@@ -11,6 +11,7 @@ use arrow::record_batch::RecordBatch;
 use ematix_probe_core::adapters::data::parquet::ParquetAdapter;
 use ematix_probe_core::{Assertion, DataAdapter, ProbePlan, Verdict};
 use parquet::arrow::ArrowWriter;
+use parquet::file::properties::WriterProperties;
 use tempfile::TempDir;
 
 fn write_parquet(path: &std::path::Path, batches: Vec<RecordBatch>) {
@@ -179,6 +180,46 @@ async fn parquet_table_level_assertions_work() {
     }]);
     let summary = a.execute(&p).await.expect("execute");
     assert_eq!(summary.verdict, Verdict::Pass);
+}
+
+#[tokio::test]
+async fn parquet_streams_multi_row_group_file() {
+    // S-5.4: write a parquet file with a small row-group size so
+    // the data spans multiple row groups, which the streaming
+    // scanner must traverse correctly. A unique check across
+    // 10k IDs with no duplicates should still pass; a row_count
+    // assertion should match the total row count.
+    let dir = TempDir::new().unwrap();
+    let path = dir.path().join("multi_rg.parquet");
+    let s = user_schema();
+    let n: i64 = 10_000;
+
+    let ids: Vec<i64> = (0..n).collect();
+    let emails: Vec<Option<&str>> = (0..n).map(|_| Some("a@x.com")).collect();
+    let ages: Vec<Option<f64>> = (0..n).map(|i| Some((i % 120) as f64)).collect();
+    let batch = user_batch(s.clone(), ids, emails, ages);
+
+    let file = std::fs::File::create(&path).unwrap();
+    // 1024-row row groups → 10 row groups for 10k rows.
+    let props = WriterProperties::builder()
+        .set_max_row_group_row_count(Some(1024))
+        .build();
+    let mut writer = ArrowWriter::try_new(file, s, Some(props)).unwrap();
+    writer.write(&batch).unwrap();
+    writer.close().unwrap();
+
+    let a = ParquetAdapter::open(&path).expect("open");
+    let p = plan(vec![
+        Assertion::Unique {
+            column: "id".into(),
+        },
+        Assertion::RowCount {
+            low: Some(n),
+            high: Some(n),
+        },
+    ]);
+    let summary = a.execute(&p).await.expect("execute");
+    assert_eq!(summary.verdict, Verdict::Pass, "unexpected: {summary:?}");
 }
 
 #[tokio::test]
