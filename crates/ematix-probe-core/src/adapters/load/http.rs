@@ -9,24 +9,12 @@ use std::time::{Duration, Instant};
 
 use crate::adapters::data::AdapterError;
 use crate::engine::load::scheduler::ConstantRateScheduler;
-use crate::engine::load::LoadPlan;
+use crate::engine::load::{LoadPlan, Sample};
 
-/// One per-tick measurement.
-///
-/// `error` is `Some` when the request couldn't complete (DNS
-/// failure, connection refused, TLS error, etc); in that case
-/// `status_code` is `None`. A 4xx / 5xx response is *not* an
-/// error from the adapter's perspective — that's a successful
-/// HTTP round-trip with a non-2xx status, surfaced via
-/// `status_code` so [`LoadAssertion::ErrorRateBelow`] can count
-/// it.
-#[derive(Debug, Clone)]
-pub struct Sample {
-    pub tick_index: u64,
-    pub latency: Duration,
-    pub status_code: Option<u16>,
-    pub error: Option<String>,
-}
+// `Sample` lives in `engine::load` so evaluators can consume it
+// without the adapters layer being a dep. Re-exported here for
+// the convenience of callers who import this module.
+pub use crate::engine::load::Sample as HttpSample;
 
 /// HTTP load adapter using `reqwest` + the constant-rate
 /// scheduler. Stateless — one client per `collect_samples` call.
