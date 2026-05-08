@@ -163,6 +163,13 @@ enum Acc {
         high: Option<i64>,
         seen: HashSet<String>,
     },
+    /// Schema check: terminal at acc-build (no per-batch state).
+    /// Verdict + message are computed up-front from the scanner's
+    /// schema and just round-tripped at finalize.
+    SchemaMatch {
+        verdict: Verdict,
+        message: Option<String>,
+    },
     /// Setup-time failure (missing column, unsupported type, or
     /// assertion not yet implemented for the scan path). Skips
     /// `update` and finalizes to `Verdict::Error`.
@@ -279,6 +286,59 @@ impl Acc {
                     low: *low,
                     high: *high,
                     count: 0,
+                }
+            }
+            Assertion::SchemaMatch { fields } => {
+                if fields.is_empty() {
+                    return Acc::Error {
+                        message: "scan-path schema_match: fields list is empty \
+                                  (asserts nothing)"
+                            .into(),
+                    };
+                }
+                let actual: Vec<(&str, &DataType)> = schema
+                    .fields()
+                    .iter()
+                    .map(|f| (f.name().as_str(), f.data_type()))
+                    .collect();
+                if actual.len() != fields.len() {
+                    return Acc::SchemaMatch {
+                        verdict: Verdict::Fail,
+                        message: Some(format!(
+                            "schema_match: expected {} field(s), got {} \
+                             (expected: {:?}, actual: {:?})",
+                            fields.len(),
+                            actual.len(),
+                            field_names(fields.iter().map(|(n, _)| n.as_str())),
+                            field_names(actual.iter().map(|(n, _)| *n)),
+                        )),
+                    };
+                }
+                for (i, ((exp_name, exp_type), (act_name, act_type))) in
+                    fields.iter().zip(actual.iter()).enumerate()
+                {
+                    if exp_name != act_name {
+                        return Acc::SchemaMatch {
+                            verdict: Verdict::Fail,
+                            message: Some(format!(
+                                "schema_match: field {i}: expected name {exp_name:?}, \
+                                 got {act_name:?}"
+                            )),
+                        };
+                    }
+                    if exp_type != *act_type {
+                        return Acc::SchemaMatch {
+                            verdict: Verdict::Fail,
+                            message: Some(format!(
+                                "schema_match: field {exp_name:?}: expected type \
+                                 {exp_type:?}, got {act_type:?}"
+                            )),
+                        };
+                    }
+                }
+                Acc::SchemaMatch {
+                    verdict: Verdict::Pass,
+                    message: None,
                 }
             }
             Assertion::CardinalityBetween { column, low, high } => {
@@ -520,6 +580,9 @@ impl Acc {
                     *self = Acc::Error { message: e };
                 }
             }
+            Acc::SchemaMatch { .. } => {
+                // No per-batch state; verdict was decided at build.
+            }
             Acc::CardinalityI64 { col_idx, seen, .. } => {
                 let arr = batch
                     .column(*col_idx)
@@ -683,6 +746,11 @@ impl Acc {
                 }
                 pass(assertion_index)
             }
+            Acc::SchemaMatch { verdict, message } => AssertionResult {
+                assertion_index,
+                verdict,
+                message,
+            },
             Acc::CardinalityI64 {
                 column,
                 low,
@@ -838,6 +906,13 @@ fn finalize_cardinality(
         }
     }
     pass(assertion_index)
+}
+
+/// Pretty-print a sequence of field names for a SchemaMatch
+/// failure message. Just collects into a Vec<&str> so the
+/// `Debug` impl on Vec gives `["id", "email"]`.
+fn field_names<'a, I: IntoIterator<Item = &'a str>>(names: I) -> Vec<&'a str> {
+    names.into_iter().collect()
 }
 
 fn column_index(schema: &Schema, column: &str) -> Result<usize, String> {

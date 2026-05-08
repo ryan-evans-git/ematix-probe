@@ -190,12 +190,7 @@ async fn schema_match_works_on_empty_stream() {
 #[tokio::test]
 async fn schema_match_empty_fields_yields_error() {
     let s = users_schema();
-    let v = run(
-        p(Assertion::SchemaMatch { fields: vec![] }),
-        s,
-        vec![],
-    )
-    .await;
+    let v = run(p(Assertion::SchemaMatch { fields: vec![] }), s, vec![]).await;
     assert_eq!(v, Verdict::Error);
 }
 
@@ -217,7 +212,10 @@ async fn schema_match_message_pinpoints_the_diff() {
     });
     let summary = evaluate(&pln, &mut sc).await.expect("evaluate");
     let msg = summary.assertions[0].message.as_ref().expect("message");
-    assert!(msg.contains("id"), "msg should reference field name: {msg:?}");
+    assert!(
+        msg.contains("id"),
+        "msg should reference field name: {msg:?}"
+    );
     assert!(
         msg.contains("Int32") && msg.contains("Int64"),
         "msg should reference both expected and actual types: {msg:?}"

@@ -120,6 +120,16 @@ impl DataAdapter for PostgresAdapter {
                          assertion in v0.1"
                     )),
                 },
+                Assertion::SchemaMatch { .. } => AssertionResult {
+                    assertion_index: idx,
+                    verdict: Verdict::Error,
+                    message: Some(
+                        "Postgres adapter does not implement SchemaMatch \
+                         — use a scan-path source (DuckDB / Parquet) for \
+                         this assertion in v0.1"
+                            .into(),
+                    ),
+                },
             };
             results.push(result);
         }

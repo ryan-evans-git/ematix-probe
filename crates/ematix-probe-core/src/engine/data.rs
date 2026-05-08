@@ -92,6 +92,17 @@ pub enum Assertion {
         low: Option<i64>,
         high: Option<i64>,
     },
+    /// Strict equality check on the source schema: same field
+    /// names, same Arrow `DataType`s, same order. Nullability
+    /// deliberately not checked in v0.1 (DuckDB/Parquet readers
+    /// often surface columns as nullable even when source data
+    /// has no NULLs). Empty `fields` list rejected at adapter
+    /// time. Scan-path only in v0.1 — pushing this down to
+    /// Postgres would require an information_schema query, which
+    /// is doable but waits on a real ask.
+    SchemaMatch {
+        fields: Vec<(String, arrow::datatypes::DataType)>,
+    },
 }
 
 /// A complete probe execution plan: which table to probe + the
