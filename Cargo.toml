@@ -31,3 +31,9 @@ testcontainers-modules = { version = "0.11", features = ["postgres"] }
 # core only needs transitively; can be pruned later if build cost
 # becomes an issue (sprint-04 risk #2).
 arrow = "58"
+# Rust regex (RE2-flavored). Used by the scan-path evaluator to
+# back the `Regex` assertion. The Postgres adapter pushes regex
+# down via Postgres POSIX (`~`) instead — flavors are similar but
+# not identical (sprint-03 risk #1 documents the user-facing
+# implication; we don't reconcile flavors in v0.1).
+regex = "1"

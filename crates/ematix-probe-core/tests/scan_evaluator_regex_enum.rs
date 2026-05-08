@@ -81,11 +81,7 @@ async fn regex_passes_when_all_match() {
 async fn regex_fails_when_one_row_doesnt_match() {
     let s = schema();
     let mut sc = scanner(vec![
-        batch(
-            s.clone(),
-            vec![Some("a@x.com")],
-            vec![Some("US")],
-        ),
+        batch(s.clone(), vec![Some("a@x.com")], vec![Some("US")]),
         batch(
             s.clone(),
             vec![Some("not-an-email")], // fails .+@.+\..+
@@ -99,7 +95,10 @@ async fn regex_fails_when_one_row_doesnt_match() {
     let summary = evaluate(&p, &mut sc).await.expect("evaluate");
     assert_eq!(summary.verdict, Verdict::Fail);
     let msg = summary.assertions[0].message.as_ref().expect("message");
-    assert!(msg.contains("email"), "msg should reference column: {msg:?}");
+    assert!(
+        msg.contains("email"),
+        "msg should reference column: {msg:?}"
+    );
     assert!(msg.contains('1'), "msg should mention 1 violation: {msg:?}");
 }
 
@@ -121,7 +120,6 @@ async fn regex_skips_nulls() {
 
 #[tokio::test]
 async fn regex_invalid_pattern_yields_error() {
-    let s = schema();
     let mut sc = scanner(vec![]);
     let p = plan(vec![Assertion::Regex {
         column: "email".into(),
@@ -174,7 +172,6 @@ async fn enum_fails_when_value_outside_allowed_set() {
 
 #[tokio::test]
 async fn enum_empty_allowed_yields_error() {
-    let s = schema();
     let mut sc = scanner(vec![]);
     let p = plan(vec![Assertion::Enum {
         column: "country".into(),

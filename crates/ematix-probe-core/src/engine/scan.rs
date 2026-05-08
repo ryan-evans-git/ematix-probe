@@ -26,6 +26,7 @@ use arrow::array::{
 use arrow::datatypes::{DataType, Schema, SchemaRef};
 use arrow::record_batch::RecordBatch;
 use async_trait::async_trait;
+use regex::Regex;
 
 use crate::adapters::data::AdapterError;
 use crate::engine::data::{
@@ -105,6 +106,20 @@ enum Acc {
         high: f64,
         oob_count: u64,
     },
+    Regex {
+        column: String,
+        col_idx: usize,
+        re: Regex,
+        pattern: String,
+        miss_count: u64,
+    },
+    Enum {
+        column: String,
+        col_idx: usize,
+        allowed: HashSet<String>,
+        allowed_len: usize,
+        miss_count: u64,
+    },
     /// Setup-time failure (missing column, unsupported type, or
     /// assertion not yet implemented for the scan path). Skips
     /// `update` and finalizes to `Verdict::Error`.
@@ -155,9 +170,63 @@ impl Acc {
                 },
                 Err(msg) => Acc::Error { message: msg },
             },
-            // Other variants are scan-path TBD (S-4.3 / S-4.4).
-            // Until then, return Error so the run still produces
-            // a Summary instead of panicking.
+            Assertion::Regex { column, pattern } => match column_index(schema, column) {
+                Ok(col_idx) => match schema.field(col_idx).data_type() {
+                    DataType::Utf8 => match Regex::new(pattern) {
+                        Ok(re) => Acc::Regex {
+                            column: column.clone(),
+                            col_idx,
+                            re,
+                            pattern: pattern.clone(),
+                            miss_count: 0,
+                        },
+                        Err(e) => Acc::Error {
+                            message: format!(
+                                "scan-path regex on column {column:?}: invalid regex pattern \
+                                 {pattern:?}: {e}"
+                            ),
+                        },
+                    },
+                    other => Acc::Error {
+                        message: format!(
+                            "scan-path regex on column {column:?}: unsupported Arrow type \
+                             {other:?} (supported: Utf8)"
+                        ),
+                    },
+                },
+                Err(msg) => Acc::Error { message: msg },
+            },
+            Assertion::Enum { column, allowed } => {
+                if allowed.is_empty() {
+                    return Acc::Error {
+                        message: format!(
+                            "scan-path enum on column {column:?}: allowed set is empty \
+                             (would reject every non-NULL row)"
+                        ),
+                    };
+                }
+                match column_index(schema, column) {
+                    Ok(col_idx) => match schema.field(col_idx).data_type() {
+                        DataType::Utf8 => Acc::Enum {
+                            column: column.clone(),
+                            col_idx,
+                            allowed: allowed.iter().cloned().collect(),
+                            allowed_len: allowed.len(),
+                            miss_count: 0,
+                        },
+                        other => Acc::Error {
+                            message: format!(
+                                "scan-path enum on column {column:?}: unsupported Arrow type \
+                                 {other:?} (supported: Utf8)"
+                            ),
+                        },
+                    },
+                    Err(msg) => Acc::Error { message: msg },
+                }
+            }
+            // Other variants are scan-path TBD (S-4.4 row_count /
+            // freshness). Until then, return Error so the run still
+            // produces a Summary instead of panicking.
             other => Acc::Error {
                 message: format!("scan-path evaluator does not yet support {other:?}"),
             },
@@ -236,6 +305,46 @@ impl Acc {
                     }
                 }
             }
+            Acc::Regex {
+                col_idx,
+                re,
+                miss_count,
+                ..
+            } => {
+                let arr = batch
+                    .column(*col_idx)
+                    .as_any()
+                    .downcast_ref::<StringArray>()
+                    .expect("Regex requires Utf8 column (validated at build)");
+                for i in 0..arr.len() {
+                    if arr.is_null(i) {
+                        continue;
+                    }
+                    if !re.is_match(arr.value(i)) {
+                        *miss_count += 1;
+                    }
+                }
+            }
+            Acc::Enum {
+                col_idx,
+                allowed,
+                miss_count,
+                ..
+            } => {
+                let arr = batch
+                    .column(*col_idx)
+                    .as_any()
+                    .downcast_ref::<StringArray>()
+                    .expect("Enum requires Utf8 column (validated at build)");
+                for i in 0..arr.len() {
+                    if arr.is_null(i) {
+                        continue;
+                    }
+                    if !allowed.contains(arr.value(i)) {
+                        *miss_count += 1;
+                    }
+                }
+            }
             Acc::Error { .. } => {}
         }
     }
@@ -284,6 +393,42 @@ impl Acc {
                     fail(
                         assertion_index,
                         format!("column {column:?} has {oob_count} row(s) outside [{low}, {high}]"),
+                    )
+                }
+            }
+            Acc::Regex {
+                column,
+                pattern,
+                miss_count,
+                ..
+            } => {
+                if miss_count == 0 {
+                    pass(assertion_index)
+                } else {
+                    fail(
+                        assertion_index,
+                        format!(
+                            "column {column:?} has {miss_count} row(s) not matching pattern \
+                             {pattern:?}"
+                        ),
+                    )
+                }
+            }
+            Acc::Enum {
+                column,
+                allowed_len,
+                miss_count,
+                ..
+            } => {
+                if miss_count == 0 {
+                    pass(assertion_index)
+                } else {
+                    fail(
+                        assertion_index,
+                        format!(
+                            "column {column:?} has {miss_count} row(s) outside allowed set \
+                             ({allowed_len} value(s))"
+                        ),
                     )
                 }
             }
