@@ -40,7 +40,12 @@ fn schema() -> SchemaRef {
     ]))
 }
 
-fn batch(schema: SchemaRef, emails: Vec<Option<&str>>, ids: Vec<Option<i64>>, ages: Vec<Option<f64>>) -> RecordBatch {
+fn batch(
+    schema: SchemaRef,
+    emails: Vec<Option<&str>>,
+    ids: Vec<Option<i64>>,
+    ages: Vec<Option<f64>>,
+) -> RecordBatch {
     RecordBatch::try_new(
         schema,
         vec![
@@ -85,14 +90,25 @@ async fn passes_when_all_three_assertions_satisfied() {
         ),
     ]);
     let p = plan(vec![
-        Assertion::NotNull { column: "email".into() },
-        Assertion::Unique { column: "user_id".into() },
-        Assertion::Between { column: "age".into(), low: 0.0, high: 120.0 },
+        Assertion::NotNull {
+            column: "email".into(),
+        },
+        Assertion::Unique {
+            column: "user_id".into(),
+        },
+        Assertion::Between {
+            column: "age".into(),
+            low: 0.0,
+            high: 120.0,
+        },
     ]);
     let summary = evaluate(&p, &mut sc).await.expect("evaluate");
     assert_eq!(summary.verdict, Verdict::Pass);
     assert_eq!(summary.assertions.len(), 3);
-    assert!(summary.assertions.iter().all(|a| a.verdict == Verdict::Pass));
+    assert!(summary
+        .assertions
+        .iter()
+        .all(|a| a.verdict == Verdict::Pass));
 }
 
 #[tokio::test]
@@ -113,12 +129,17 @@ async fn not_null_fails_when_null_in_later_batch() {
             vec![Some(33.0), Some(50.0)],
         ),
     ]);
-    let p = plan(vec![Assertion::NotNull { column: "email".into() }]);
+    let p = plan(vec![Assertion::NotNull {
+        column: "email".into(),
+    }]);
     let summary = evaluate(&p, &mut sc).await.expect("evaluate");
     assert_eq!(summary.verdict, Verdict::Fail);
     assert_eq!(summary.assertions[0].verdict, Verdict::Fail);
     let msg = summary.assertions[0].message.as_ref().expect("message");
-    assert!(msg.contains("email"), "msg should reference column: {msg:?}");
+    assert!(
+        msg.contains("email"),
+        "msg should reference column: {msg:?}"
+    );
     assert!(msg.contains('1'), "msg should mention 1 NULL row: {msg:?}");
 }
 
@@ -140,24 +161,27 @@ async fn unique_fails_when_duplicate_spans_two_batches() {
             vec![Some(30.0)],
         ),
     ]);
-    let p = plan(vec![Assertion::Unique { column: "user_id".into() }]);
+    let p = plan(vec![Assertion::Unique {
+        column: "user_id".into(),
+    }]);
     let summary = evaluate(&p, &mut sc).await.expect("evaluate");
     assert_eq!(summary.verdict, Verdict::Fail);
     let msg = summary.assertions[0].message.as_ref().expect("message");
-    assert!(msg.contains("user_id"), "msg should reference column: {msg:?}");
+    assert!(
+        msg.contains("user_id"),
+        "msg should reference column: {msg:?}"
+    );
 }
 
 #[tokio::test]
 async fn between_fails_when_value_out_of_range() {
     let s = schema();
-    let mut sc = scanner(vec![
-        batch(
-            s.clone(),
-            vec![Some("a@x"), Some("b@y")],
-            vec![Some(1), Some(2)],
-            vec![Some(25.0), Some(200.0)], // 200 > 120
-        ),
-    ]);
+    let mut sc = scanner(vec![batch(
+        s.clone(),
+        vec![Some("a@x"), Some("b@y")],
+        vec![Some(1), Some(2)],
+        vec![Some(25.0), Some(200.0)], // 200 > 120
+    )]);
     let p = plan(vec![Assertion::Between {
         column: "age".into(),
         low: 0.0,
@@ -167,7 +191,10 @@ async fn between_fails_when_value_out_of_range() {
     assert_eq!(summary.verdict, Verdict::Fail);
     let msg = summary.assertions[0].message.as_ref().expect("message");
     assert!(msg.contains("age"), "msg should reference column: {msg:?}");
-    assert!(msg.contains("1"), "msg should mention 1 out-of-range row: {msg:?}");
+    assert!(
+        msg.contains("1"),
+        "msg should mention 1 out-of-range row: {msg:?}"
+    );
 }
 
 #[tokio::test]
@@ -175,8 +202,12 @@ async fn empty_scanner_passes_for_not_null_and_unique() {
     // Empty stream: no rows means no NULLs and no duplicates.
     let mut sc = scanner(vec![]);
     let p = plan(vec![
-        Assertion::NotNull { column: "email".into() },
-        Assertion::Unique { column: "user_id".into() },
+        Assertion::NotNull {
+            column: "email".into(),
+        },
+        Assertion::Unique {
+            column: "user_id".into(),
+        },
     ]);
     let summary = evaluate(&p, &mut sc).await.expect("evaluate");
     assert_eq!(summary.verdict, Verdict::Pass);
@@ -187,9 +218,14 @@ async fn missing_column_yields_error_verdict() {
     // Plan references a column the scanner's schema doesn't have.
     // Should produce an Error result (not panic, not silently pass).
     let mut sc = scanner(vec![]);
-    let p = plan(vec![Assertion::NotNull { column: "nope".into() }]);
+    let p = plan(vec![Assertion::NotNull {
+        column: "nope".into(),
+    }]);
     let summary = evaluate(&p, &mut sc).await.expect("evaluate");
     assert_eq!(summary.verdict, Verdict::Error);
     let msg = summary.assertions[0].message.as_ref().expect("message");
-    assert!(msg.contains("nope"), "msg should reference missing col: {msg:?}");
+    assert!(
+        msg.contains("nope"),
+        "msg should reference missing col: {msg:?}"
+    );
 }

@@ -96,3 +96,17 @@ pub struct RunSummary {
     pub verdict: Verdict,
     pub assertions: Vec<AssertionResult>,
 }
+
+/// Reduce per-assertion verdicts into the run-level verdict.
+/// Any `Error` → overall `Error`; else any `Fail` → overall `Fail`;
+/// else `Pass`. Used by both pushdown adapters and the scan-path
+/// evaluator so they reach the same conclusion from the same inputs.
+pub fn reduce_verdict(results: &[AssertionResult]) -> Verdict {
+    if results.iter().any(|r| r.verdict == Verdict::Error) {
+        Verdict::Error
+    } else if results.iter().any(|r| r.verdict == Verdict::Fail) {
+        Verdict::Fail
+    } else {
+        Verdict::Pass
+    }
+}

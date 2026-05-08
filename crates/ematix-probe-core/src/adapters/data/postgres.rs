@@ -12,7 +12,9 @@ use deadpool_postgres::{Manager, ManagerConfig, Pool, RecyclingMethod};
 use tokio_postgres::{Config, NoTls};
 
 use crate::adapters::data::{AdapterError, DataAdapter};
-use crate::engine::data::{Assertion, AssertionResult, ProbePlan, RunSummary, Verdict};
+use crate::engine::data::{
+    reduce_verdict, Assertion, AssertionResult, ProbePlan, RunSummary, Verdict,
+};
 
 /// Pooled Postgres adapter.
 ///
@@ -485,18 +487,6 @@ impl PostgresAdapter {
                 )),
             }),
         }
-    }
-}
-
-/// Combine per-assertion verdicts into the run-level verdict.
-/// Public-crate-visible so all data adapters can share it.
-pub(crate) fn reduce_verdict(results: &[AssertionResult]) -> Verdict {
-    if results.iter().any(|r| r.verdict == Verdict::Error) {
-        Verdict::Error
-    } else if results.iter().any(|r| r.verdict == Verdict::Fail) {
-        Verdict::Fail
-    } else {
-        Verdict::Pass
     }
 }
 
