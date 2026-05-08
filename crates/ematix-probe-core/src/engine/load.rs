@@ -8,6 +8,8 @@
 //! `reduce_verdict` from `engine::data` so callers see one
 //! consistent verdict-reduction story across data + load probes.
 
+pub mod scheduler;
+
 use std::time::Duration;
 
 /// HTTP target for a load probe. v0.1 only supports `GET`.
