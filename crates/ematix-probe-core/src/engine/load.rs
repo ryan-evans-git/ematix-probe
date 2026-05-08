@@ -150,15 +150,45 @@ fn eval_p99_under(
     }
 }
 
-fn eval_error_rate_below(idx: usize, _threshold: f64, _samples: &[Sample]) -> AssertionResult {
-    // Stub — real evaluator lands in S-6.7 with its own
-    // RED→GREEN cycle. Until then, surface as Error so the
-    // verdict reduction still produces a well-formed Summary
-    // instead of falsely passing.
-    acc_error(
-        idx,
-        "ErrorRateBelow: scan-path evaluator not yet implemented (S-6.7)".into(),
-    )
+fn eval_error_rate_below(idx: usize, threshold: f64, samples: &[Sample]) -> AssertionResult {
+    if !threshold.is_finite() || !(0.0..=1.0).contains(&threshold) {
+        return acc_error(
+            idx,
+            format!("ErrorRateBelow: threshold must be in [0.0, 1.0] (got {threshold})"),
+        );
+    }
+    if samples.is_empty() {
+        return acc_error(
+            idx,
+            "ErrorRateBelow: no samples to compute error rate on".to_string(),
+        );
+    }
+    // "Error" = connection failure OR non-2xx HTTP response.
+    // Both are user-visible outage signal; conflating them into
+    // one rate matches k6 / vegeta / locust.
+    let total = samples.len();
+    let bad = samples
+        .iter()
+        .filter(|s| {
+            s.error.is_some() || !matches!(s.status_code, Some(c) if (200..300).contains(&c))
+        })
+        .count();
+    let rate = bad as f64 / total as f64;
+    if rate < threshold {
+        AssertionResult {
+            assertion_index: idx,
+            verdict: Verdict::Pass,
+            message: None,
+        }
+    } else {
+        AssertionResult {
+            assertion_index: idx,
+            verdict: Verdict::Fail,
+            message: Some(format!(
+                "error_rate = {rate:.4} ({bad} of {total} samples); expected < {threshold:.4}"
+            )),
+        }
+    }
 }
 
 fn acc_error(idx: usize, msg: String) -> AssertionResult {
