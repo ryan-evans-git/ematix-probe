@@ -10,7 +10,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
 from ematix_probe import probe, source
 from ematix_probe._core import duckdb_setup
 
