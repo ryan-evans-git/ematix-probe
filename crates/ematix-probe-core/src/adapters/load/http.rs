@@ -8,8 +8,8 @@
 use std::time::{Duration, Instant};
 
 use crate::adapters::data::AdapterError;
-use crate::engine::load::scheduler::ConstantRateScheduler;
-use crate::engine::load::{LoadPlan, Sample};
+use crate::engine::load::scheduler::{ConstantRateScheduler, VuPool};
+use crate::engine::load::{LoadMode, LoadPlan, Sample};
 
 // `Sample` lives in `engine::load` so evaluators can consume it
 // without the adapters layer being a dep. Re-exported here for
@@ -38,34 +38,35 @@ impl HttpLoadAdapter {
             .build()
             .map_err(|e| AdapterError::Connection(format!("reqwest client: {e}")))?;
 
-        let mut sched = ConstantRateScheduler::new(plan.rps, plan.duration);
-        let mut handles = Vec::new();
+        let url = plan.target.url.clone();
+        let samples = match plan.mode {
+            LoadMode::ConstantRate { rps } => {
+                Self::collect_constant_rate(client, url, rps, plan.duration).await?
+            }
+            LoadMode::VirtualUsers { count } => {
+                Self::collect_virtual_users(client, url, count, plan.duration).await
+            }
+        };
+        Ok(samples)
+    }
 
+    /// Open-model collection: drive the scheduler and spawn one
+    /// request per tick. Existing v0.1 path; preserved verbatim.
+    async fn collect_constant_rate(
+        client: reqwest::Client,
+        url: String,
+        rps: f64,
+        duration: Duration,
+    ) -> Result<Vec<Sample>, AdapterError> {
+        let mut sched = ConstantRateScheduler::new(rps, duration);
+        let mut handles = Vec::new();
         while let Some(tick) = sched.next_tick().await {
             let client = client.clone();
-            let url = plan.target.url.clone();
-            let h = tokio::spawn(async move {
-                let started = Instant::now();
-                let result = client.get(&url).send().await;
-                let latency = started.elapsed();
-                match result {
-                    Ok(resp) => Sample {
-                        tick_index: tick.index,
-                        latency,
-                        status_code: Some(resp.status().as_u16()),
-                        error: None,
-                    },
-                    Err(e) => Sample {
-                        tick_index: tick.index,
-                        latency,
-                        status_code: None,
-                        error: Some(e.to_string()),
-                    },
-                }
-            });
-            handles.push(h);
+            let url = url.clone();
+            handles.push(tokio::spawn(async move {
+                request_to_sample(&client, &url, tick.index).await
+            }));
         }
-
         let mut samples = Vec::with_capacity(handles.len());
         for h in handles {
             samples.push(
@@ -73,10 +74,49 @@ impl HttpLoadAdapter {
                     .map_err(|e| AdapterError::Connection(format!("join: {e}")))?,
             );
         }
-        // Sort by tick_index so the output order is deterministic
-        // even though spawned requests may finish out-of-order.
         samples.sort_by_key(|s| s.tick_index);
         Ok(samples)
+    }
+
+    /// Closed-model collection: hand a request closure to
+    /// [`VuPool`] which loops the workers itself.
+    async fn collect_virtual_users(
+        client: reqwest::Client,
+        url: String,
+        count: usize,
+        duration: Duration,
+    ) -> Vec<Sample> {
+        let pool = VuPool::new(count, duration);
+        let url = std::sync::Arc::new(url);
+        pool.run(move |idx| {
+            let client = client.clone();
+            let url = url.clone();
+            async move { request_to_sample(&client, &url, idx).await }
+        })
+        .await
+    }
+}
+
+/// One request → one Sample. Connection-level failures land as
+/// `error: Some, status_code: None`; 4xx/5xx are still
+/// successful round-trips with a non-2xx `status_code`.
+async fn request_to_sample(client: &reqwest::Client, url: &str, tick_index: u64) -> Sample {
+    let started = Instant::now();
+    let result = client.get(url).send().await;
+    let latency = started.elapsed();
+    match result {
+        Ok(resp) => Sample {
+            tick_index,
+            latency,
+            status_code: Some(resp.status().as_u16()),
+            error: None,
+        },
+        Err(e) => Sample {
+            tick_index,
+            latency,
+            status_code: None,
+            error: Some(e.to_string()),
+        },
     }
 }
 

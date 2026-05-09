@@ -35,3 +35,6 @@ venv/
 # OS
 .DS_Store
 Thumbs.db
+
+# Claude Code runtime (settings.json is tracked; transient lock files aren't)
+.claude/scheduled_tasks.lock

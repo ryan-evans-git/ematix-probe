@@ -7,14 +7,14 @@
 use std::time::Duration;
 
 use ematix_probe_core::engine::data::{reduce_verdict, AssertionResult, Verdict};
-use ematix_probe_core::engine::load::{HttpTarget, LoadAssertion, LoadPlan};
+use ematix_probe_core::engine::load::{HttpTarget, LoadAssertion, LoadMode, LoadPlan};
 
 #[test]
 fn load_plan_holds_target_duration_rps_and_assertions() {
     let plan = LoadPlan {
         target: HttpTarget::get("http://example.com/health"),
         duration: Duration::from_secs(5),
-        rps: 10.0,
+        mode: LoadMode::ConstantRate { rps: 10.0 },
         warmup: Duration::ZERO,
         assertions: vec![
             LoadAssertion::P99Under {
@@ -27,7 +27,7 @@ fn load_plan_holds_target_duration_rps_and_assertions() {
     assert_eq!(plan.target.url, "http://example.com/health");
     assert_eq!(plan.target.method, "GET");
     assert_eq!(plan.duration, Duration::from_secs(5));
-    assert_eq!(plan.rps, 10.0);
+    assert!(matches!(plan.mode, LoadMode::ConstantRate { rps } if rps == 10.0));
     assert_eq!(plan.warmup, Duration::ZERO);
     assert_eq!(plan.assertions.len(), 2);
 }

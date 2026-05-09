@@ -8,6 +8,7 @@
 //! `reduce_verdict` from `engine::data` so callers see one
 //! consistent verdict-reduction story across data + load probes.
 
+pub mod postgres;
 pub mod scheduler;
 
 use std::time::Duration;
@@ -64,15 +65,32 @@ pub enum LoadAssertion {
     StatusCodeIn { allowed: Vec<u16> },
 }
 
+/// Scheduling discipline. v0.1 ships `ConstantRate` (open
+/// model — fires Ticks at a target RPS regardless of how slow
+/// the target is); `VirtualUsers` (closed model — N concurrent
+/// workers each looping request → wait → request) lands in
+/// S-8.2.
+#[derive(Debug, Clone, Copy, PartialEq)]
+#[non_exhaustive]
+pub enum LoadMode {
+    /// Open-model load. Target throughput in req/s. Real
+    /// throughput on a busy runner may drift below this; the
+    /// scheduler from S-6.4 documents acceptable drift.
+    ConstantRate { rps: f64 },
+    /// Closed-model load. `count` concurrent virtual users
+    /// each loop "request → wait → request" until the plan
+    /// duration elapses. Achieved RPS depends on per-request
+    /// latency.
+    VirtualUsers { count: usize },
+}
+
 /// A complete load-probe execution plan.
 #[derive(Debug, Clone)]
 pub struct LoadPlan {
     pub target: HttpTarget,
     pub duration: Duration,
-    /// Constant target throughput in requests per second. Real
-    /// throughput on a slow runner / network may drift below
-    /// this; the scheduler in S-6.4 documents acceptable drift.
-    pub rps: f64,
+    /// Scheduling discipline. See [`LoadMode`].
+    pub mode: LoadMode,
     /// Warmup window. Samples whose `tick_index` falls in
     /// `[0, floor(warmup_secs * rps))` are dropped before
     /// evaluation — first-connection DNS / TLS / connection
@@ -82,6 +100,15 @@ pub struct LoadPlan {
     /// for every assertion.
     pub warmup: Duration,
     pub assertions: Vec<LoadAssertion>,
+}
+
+impl LoadPlan {
+    /// Convenience for callers that want the per-second tick
+    /// budget without bringing the [`LoadProfile`] trait into
+    /// scope. See `LoadProfile::nominal_rps`.
+    pub fn nominal_rps(&self) -> Option<f64> {
+        <Self as LoadProfile>::nominal_rps(self)
+    }
 }
 
 /// One per-tick measurement collected by a load adapter.
@@ -98,24 +125,64 @@ pub struct Sample {
     pub error: Option<String>,
 }
 
-/// Evaluate a `LoadPlan` against a buffered slice of `Sample`s.
-/// Mirrors `engine::scan::evaluate` for data probes — produces
-/// a `RunSummary` with one `AssertionResult` per `LoadAssertion`.
-pub fn evaluate_load(plan: &LoadPlan, samples: &[Sample]) -> RunSummary {
+/// Target-agnostic view a load plan must expose for the evaluator.
+/// Both [`LoadPlan`] (HTTP) and [`postgres::PgLoadPlan`] implement
+/// it so [`evaluate_load`] is one entry point regardless of target
+/// type. The evaluator only consumes timing + assertions, never
+/// the target details.
+pub trait LoadProfile {
+    fn duration(&self) -> Duration;
+    fn warmup(&self) -> Duration;
+    fn mode(&self) -> LoadMode;
+    fn assertions(&self) -> &[LoadAssertion];
+
+    /// Convenience for evaluators that need the per-second tick
+    /// budget. Returns the configured rps for `ConstantRate`;
+    /// for non-RPS-driven modes returns `None`.
+    fn nominal_rps(&self) -> Option<f64> {
+        match self.mode() {
+            LoadMode::ConstantRate { rps } => Some(rps),
+            LoadMode::VirtualUsers { .. } => None,
+        }
+    }
+}
+
+impl LoadProfile for LoadPlan {
+    fn duration(&self) -> Duration {
+        self.duration
+    }
+    fn warmup(&self) -> Duration {
+        self.warmup
+    }
+    fn mode(&self) -> LoadMode {
+        self.mode
+    }
+    fn assertions(&self) -> &[LoadAssertion] {
+        &self.assertions
+    }
+}
+
+/// Evaluate a load plan against a buffered slice of `Sample`s.
+/// Generic over the plan type via [`LoadProfile`] so HTTP and
+/// Postgres plans share one entry point. Mirrors
+/// `engine::scan::evaluate` for data probes — produces a
+/// `RunSummary` with one `AssertionResult` per `LoadAssertion`.
+pub fn evaluate_load<P: LoadProfile>(plan: &P, samples: &[Sample]) -> RunSummary {
     // Warmup must leave a non-empty measurable window. Surfaces
     // as Error per assertion so callers see a clear diagnostic
     // rather than e.g. a divide-by-zero panic in throughput.
-    if plan.warmup >= plan.duration {
+    let warmup = plan.warmup();
+    let duration = plan.duration();
+    if warmup >= duration {
         let results: Vec<AssertionResult> = plan
-            .assertions
+            .assertions()
             .iter()
             .enumerate()
             .map(|(i, _)| {
                 acc_error(
                     i,
                     format!(
-                        "warmup ({:?}) must be < duration ({:?}) — no measurable window",
-                        plan.warmup, plan.duration
+                        "warmup ({warmup:?}) must be < duration ({duration:?}) — no measurable window"
                     ),
                 )
             })
@@ -126,20 +193,27 @@ pub fn evaluate_load(plan: &LoadPlan, samples: &[Sample]) -> RunSummary {
         };
     }
 
-    // Filter out samples in the warmup window. Tick i fires at
-    // i / rps seconds; in warmup iff i / rps < warmup_secs.
-    let warmup_ticks = (plan.warmup.as_secs_f64() * plan.rps).floor() as u64;
+    // Filter out samples in the warmup window. For ConstantRate,
+    // tick i fires at i / rps seconds, so "in warmup" iff
+    // `i / rps < warmup_secs`. Closed-model (VirtualUsers) has no
+    // fixed rps, so all samples count — closed-model warmup would
+    // need a time-based filter (deferred).
+    let warmup_ticks = match plan.nominal_rps() {
+        Some(rps) => (warmup.as_secs_f64() * rps).floor() as u64,
+        None => 0,
+    };
     let measured: Vec<Sample> = samples
         .iter()
         .filter(|s| s.tick_index >= warmup_ticks)
         .cloned()
         .collect();
 
+    let effective = duration.saturating_sub(warmup);
     let results: Vec<AssertionResult> = plan
-        .assertions
+        .assertions()
         .iter()
         .enumerate()
-        .map(|(i, a)| eval_one(i, a, plan, &measured))
+        .map(|(i, a)| eval_one(i, a, effective, &measured))
         .collect();
     RunSummary {
         verdict: reduce_verdict(&results),
@@ -150,7 +224,7 @@ pub fn evaluate_load(plan: &LoadPlan, samples: &[Sample]) -> RunSummary {
 fn eval_one(
     idx: usize,
     assertion: &LoadAssertion,
-    plan: &LoadPlan,
+    effective_duration: Duration,
     samples: &[Sample],
 ) -> AssertionResult {
     match assertion {
@@ -162,11 +236,9 @@ fn eval_one(
             eval_error_rate_below(idx, *threshold, samples)
         }
         LoadAssertion::ThroughputAbove { threshold_rps } => {
-            // Effective measurement window = duration - warmup.
-            // (Already validated > 0 by the warmup guard in
-            // evaluate_load before we get here.)
-            let effective = plan.duration.saturating_sub(plan.warmup);
-            eval_throughput_above(idx, *threshold_rps, effective, samples)
+            // Effective measurement window passed in by
+            // evaluate_load, already > 0 (warmup guard above).
+            eval_throughput_above(idx, *threshold_rps, effective_duration, samples)
         }
         LoadAssertion::StatusCodeIn { allowed } => eval_status_code_in(idx, allowed, samples),
     }

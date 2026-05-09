@@ -1,4 +1,6 @@
-//! Constant-rate scheduler for load probes.
+//! Schedulers for load probes — open-model
+//! ([`ConstantRateScheduler`]) and closed-model ([`VuPool`]).
+//!
 //!
 //! Tick #i is *scheduled* at `start + i / rps`. The scheduler
 //! sleeps until that instant before emitting; on a busy runner
@@ -12,7 +14,12 @@
 //! and the HTTP adapter (S-6.5) consumes the resulting tick
 //! stream to issue requests.
 
+use std::future::Future;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
+
+use crate::engine::load::Sample;
 
 /// One scheduling event.
 #[derive(Debug, Clone, Copy)]
@@ -69,5 +76,68 @@ impl ConstantRateScheduler {
         };
         self.next_index += 1;
         Some(tick)
+    }
+}
+
+/// Closed-model load: a pool of `count` workers each loop
+/// "request → wait → request" until `duration` elapses. Per-tick
+/// `tick_index` is assigned by an atomic counter so workers
+/// never collide. The output is sorted by `tick_index` for
+/// deterministic ordering.
+///
+/// Distinct from [`ConstantRateScheduler`]: that one fires at
+/// a fixed rate regardless of how slow the work is (open model),
+/// while `VuPool`'s achieved RPS depends entirely on per-work
+/// latency (closed model). Standard for stress-testing a
+/// service that backs off under load.
+pub struct VuPool {
+    count: usize,
+    duration: Duration,
+}
+
+impl VuPool {
+    pub fn new(count: usize, duration: Duration) -> Self {
+        Self { count, duration }
+    }
+
+    /// Drive the pool. `work(tick_index)` is called once per
+    /// iteration on each worker; the returned `Sample` lands
+    /// in the output. Stops accepting new work once
+    /// `Instant::now() >= start + duration`.
+    pub async fn run<F, Fut>(&self, work: F) -> Vec<Sample>
+    where
+        F: Fn(u64) -> Fut + Send + Sync + Clone + 'static,
+        Fut: Future<Output = Sample> + Send + 'static,
+    {
+        if self.duration.is_zero() {
+            return Vec::new();
+        }
+        let next_index = Arc::new(AtomicU64::new(0));
+        let deadline = Instant::now() + self.duration;
+        let mut handles = Vec::with_capacity(self.count);
+        for _ in 0..self.count {
+            let work = work.clone();
+            let next_index = next_index.clone();
+            handles.push(tokio::spawn(async move {
+                let mut samples: Vec<Sample> = Vec::new();
+                loop {
+                    if Instant::now() >= deadline {
+                        break;
+                    }
+                    let idx = next_index.fetch_add(1, Ordering::SeqCst);
+                    let s = work(idx).await;
+                    samples.push(s);
+                }
+                samples
+            }));
+        }
+        let mut all: Vec<Sample> = Vec::new();
+        for h in handles {
+            if let Ok(mut chunk) = h.await {
+                all.append(&mut chunk);
+            }
+        }
+        all.sort_by_key(|s| s.tick_index);
+        all
     }
 }

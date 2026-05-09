@@ -11,7 +11,9 @@
 
 use std::time::Duration;
 
-use ematix_probe_core::engine::load::{evaluate_load, HttpTarget, LoadAssertion, LoadPlan, Sample};
+use ematix_probe_core::engine::load::{
+    evaluate_load, HttpTarget, LoadAssertion, LoadMode, LoadPlan, Sample,
+};
 use ematix_probe_core::Verdict;
 
 fn s(idx: u64, latency_ms: u64, status: Option<u16>) -> Sample {
@@ -40,7 +42,7 @@ fn warmup_drops_early_samples_for_p99() {
     let plan = LoadPlan {
         target: HttpTarget::get("http://x.test"),
         duration: Duration::from_secs(1),
-        rps: 100.0,
+        mode: LoadMode::ConstantRate { rps: 100.0 },
         warmup: Duration::from_millis(100),
         assertions: vec![LoadAssertion::P99Under {
             metric: "latency_ms".into(),
@@ -65,7 +67,7 @@ fn throughput_denominator_excludes_warmup() {
     let plan = LoadPlan {
         target: HttpTarget::get("http://x.test"),
         duration: Duration::from_secs(2),
-        rps: 10.0,
+        mode: LoadMode::ConstantRate { rps: 10.0 },
         warmup: Duration::from_secs(1),
         assertions: vec![LoadAssertion::ThroughputAbove { threshold_rps: 9.5 }],
     };
@@ -79,7 +81,7 @@ fn warmup_zero_is_default_and_filters_nothing() {
     let plan = LoadPlan {
         target: HttpTarget::get("http://x.test"),
         duration: Duration::from_secs(1),
-        rps: 10.0,
+        mode: LoadMode::ConstantRate { rps: 10.0 },
         warmup: Duration::ZERO,
         assertions: vec![LoadAssertion::ThroughputAbove {
             threshold_rps: 10.0,
@@ -94,7 +96,7 @@ fn warmup_at_or_above_duration_yields_error() {
     let plan = LoadPlan {
         target: HttpTarget::get("http://x.test"),
         duration: Duration::from_secs(1),
-        rps: 10.0,
+        mode: LoadMode::ConstantRate { rps: 10.0 },
         warmup: Duration::from_secs(2), // > duration
         assertions: vec![LoadAssertion::ThroughputAbove { threshold_rps: 1.0 }],
     };

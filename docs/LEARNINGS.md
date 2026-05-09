@@ -12,6 +12,54 @@ Tags: `process`, `tooling`, `architecture`, `perf`, `tdd`, `drift`,
 
 ---
 
+## 2026-05-09 — `tokio-postgres` bind types are strict on `$N` casts `rust`
+
+In Sprint 8 the first PostgresLoadAdapter test failed with
+`error serializing parameter 0` against
+`SELECT $1::int + 1` even though the bind value was a perfectly
+normal `i64`.
+
+Reason: `i64` binds as `int8` (BIGINT). `$1::int` parses as `int4`
+on the server. tokio-postgres rejects the type mismatch *client-
+side* during serialization — the wire types don't agree.
+
+Fix: cast on the server with the type that matches your bind
+(`$1::bigint` for `i64`, `$1::float8` for `f64`, etc.), or pass a
+narrower bind type when a narrower column is in play.
+
+Why this matters: easy to write `::int` reflexively and burn an
+hour chasing what looks like a parameter-encoding bug. The error
+message ("error serializing parameter 0") points at the client,
+not the type mismatch — which is the actual cause. Documented in
+the `postgres_load_demo` example so the next person reading it
+doesn't trip over the same thing.
+
+## 2026-05-09 — Trait-based polymorphism over plan structs `architecture`
+
+Sprint 8 needed `evaluate_load` to handle both `LoadPlan` (HTTP)
+and `PgLoadPlan` (Postgres). Considered three paths:
+
+1. Generic `LoadPlan<T>` with the target as a type parameter.
+2. `LoadTarget` enum on `LoadPlan` with runtime dispatch inside
+   adapters.
+3. Small `LoadProfile` trait exposing the four read-only fields
+   the evaluator actually consumes (`duration / warmup / mode /
+   assertions`); both plan structs implement it.
+
+Picked (3). It was the lowest-blast-radius change: every existing
+`evaluate_load(&plan, ...)` call site kept working because Rust
+infers the trait param from `&plan`. Adding a new plan type is a
+four-line `impl`.
+
+(1) would have rippled through the `eval_one` signature and every
+call site. (2) puts a runtime variant check inside each adapter
+that should never fail in correct code — added complexity for
+nothing.
+
+Heuristic: when polymorphism is over a *small read-only slice* of
+several otherwise-distinct structs, prefer a thin trait over enum
+or generic. Blast radius is one trait + one impl per type.
+
 ## 2026-05-06 — Project kickoff `process`
 
 Decisions made before any code:

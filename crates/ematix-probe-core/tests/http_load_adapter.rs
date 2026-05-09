@@ -11,7 +11,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use ematix_probe_core::adapters::load::http::HttpLoadAdapter;
-use ematix_probe_core::engine::load::{HttpTarget, LoadPlan};
+use ematix_probe_core::engine::load::{HttpTarget, LoadMode, LoadPlan};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 
@@ -70,7 +70,7 @@ async fn collects_one_sample_per_tick() {
     let plan = LoadPlan {
         target: HttpTarget::get(&url),
         duration: Duration::from_millis(500),
-        rps: 10.0,
+        mode: LoadMode::ConstantRate { rps: 10.0 },
         warmup: Duration::ZERO,
         assertions: vec![],
     };
@@ -98,7 +98,7 @@ async fn surfaces_5xx_status_codes() {
     let plan = LoadPlan {
         target: HttpTarget::get(&url),
         duration: Duration::from_millis(300),
-        rps: 10.0,
+        mode: LoadMode::ConstantRate { rps: 10.0 },
         warmup: Duration::ZERO,
         assertions: vec![],
     };
@@ -122,7 +122,7 @@ async fn unreachable_target_yields_error_samples() {
     let plan = LoadPlan {
         target: HttpTarget::get("http://127.0.0.1:1/"),
         duration: Duration::from_millis(300),
-        rps: 5.0,
+        mode: LoadMode::ConstantRate { rps: 5.0 },
         warmup: Duration::ZERO,
         assertions: vec![],
     };

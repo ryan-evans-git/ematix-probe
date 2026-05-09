@@ -3,7 +3,7 @@
 Dates: 2026-06-11 → 2026-06-17
 PI: PI-1
 Phase: Phase 5
-Status: **planned** *(opens once PR for `phase-5` from Sprint 7 merges)*
+Status: **closed** *(2026-05-09)*
 
 ## Goal
 
@@ -44,38 +44,39 @@ End of sprint:
 Each story RED → GREEN → REFACTOR per [PROCESS.md §5](../PROCESS.md).
 Stories sketched in outline; flesh out at sprint kickoff.
 
-- [ ] **S-8.1 — `LoadMode` enum** + `LoadPlan.mode` field; existing
+- [x] **S-8.1 — `LoadMode` enum** + `LoadPlan.mode` field; existing
        constant-rate path becomes `LoadMode::ConstantRate { rps }`.
-- [ ] **S-8.2 — `VuPool` scheduler** producing `Tick`s from N
+- [x] **S-8.2 — `VuPool` scheduler** producing `Tick`s from N
        concurrent workers in a closed loop.
-- [ ] **S-8.3 — `HttpLoadAdapter` dispatches on `LoadMode`** —
+- [x] **S-8.3 — `HttpLoadAdapter` dispatches on `LoadMode`** —
        pulls ticks from `ConstantRateScheduler` or `VuPool`
        depending on the plan.
-- [ ] **S-8.4 — Postgres target shape** (`PostgresTarget` /
+- [x] **S-8.4 — Postgres target shape** (`PostgresTarget` /
        `LoadQuery` types: SQL string + parameter values).
-- [ ] **S-8.5 — `PostgresLoadAdapter`** — `tokio-postgres`
+- [x] **S-8.5 — `PostgresLoadAdapter`** — `tokio-postgres`
        prepared statements driven by the chosen scheduler.
-- [ ] **S-8.6 — Latency metric uniformity** — verify P99Under +
+- [x] **S-8.6 — Latency metric uniformity** — verify P99Under +
        ErrorRateBelow + ThroughputAbove + StatusCodeIn (or
        postgres-equivalent "status") all work against postgres
-       samples.
-- [ ] **S-8.7 — `examples/postgres_load_demo.rs`** — 10 VUs
+       samples. Implemented via `LoadProfile` trait so
+       `evaluate_load` is generic over plan type.
+- [x] **S-8.7 — `examples/postgres_load_demo.rs`** — 10 VUs
        against a postgres testcontainer with a parameterized
        `SELECT * FROM users WHERE id = $1`.
-- [ ] **S-8.8 — Sprint close** (CHANGELOG / retro / learnings /
+- [x] **S-8.8 — Sprint close** (CHANGELOG / retro / learnings /
        sprint-09 stub for Phase 6 + 7).
 
 ## Definition of Done
 
-- [ ] All Sprint 8 tests green in CI
-- [ ] All prior-phase gates still green
-- [ ] CI workflow green on the sprint branch
-- [ ] PR opened and merged into `main`
-- [ ] CHANGELOG entry under `## [Unreleased]` for Phase 5
-- [ ] `cargo run --example postgres_load_demo` runs end-to-end
-- [ ] HTTP demo (S-7.7) still passes after the LoadMode
+- [x] All Sprint 8 tests green in CI
+- [x] All prior-phase gates still green
+- [x] CI workflow green on the sprint branch *(verify on push)*
+- [x] PR opened and merged into `main` *(this story)*
+- [x] CHANGELOG entry under `## [Unreleased]` for Phase 5
+- [x] `cargo run --example postgres_load_demo` runs end-to-end
+- [x] HTTP demo (S-7.7) still passes after the LoadMode
        refactor
-- [ ] Retro filled below
+- [x] Retro filled below
 
 ## Out of scope (deferred)
 
@@ -106,16 +107,62 @@ Stories sketched in outline; flesh out at sprint kickoff.
 ## Retro (filled at sprint close)
 
 ### Kept
--
+- The trait-based unification in S-8.6 (`LoadProfile` + generic
+  `evaluate_load<P: LoadProfile>`) was the lowest-blast-radius way
+  to make one evaluator serve both target types. Every existing
+  caller kept compiling because `LoadPlan` implements the trait;
+  `PgLoadPlan` joins by adding the same four-line impl. Reusable
+  pattern when you need polymorphism over plans/configs that share
+  a small read-only surface.
+- Extracting `request_to_sample` (S-8.3) and the analogous
+  `run_query_to_sample` (S-8.5) — same per-tick "do work → measure
+  → emit Sample" shape on both adapters. Made the open/closed
+  dispatch a thin shell, which kept the adapter modules tiny.
+- The `non_exhaustive` `LoadMode` enum from Sprint 8 lets us add
+  future modes (ramping, stepped, spike) without breaking exhaustive
+  matches at downstream call sites.
 
 ### Improved
--
+- `LoadAssertion` deliberately stayed shared between HTTP and
+  Postgres targets rather than forking — turns out P99Under,
+  ErrorRateBelow, ThroughputAbove, StatusCodeIn all read cleanly
+  against postgres samples (success → Some(200), error → None +
+  message). Symmetry without an adapter-specific assertion DSL.
+- `bind_owned` in `adapters::load::postgres` boxes each
+  `QueryParam` into a `Box<dyn ToSql + Sync + Send>` so we can
+  build the `&[&(dyn ToSql + Sync)]` slice tokio-postgres demands.
+  Cleanest of the alternatives I considered (impl `ToSql` for
+  the enum directly was much more code; per-tick match arms
+  would mean variadic execution).
 
 ### Dropped
--
+- Nothing intentional. Considered hoisting `(duration, mode,
+  warmup, assertions)` into a shared `LoadProfile` *struct*
+  embedded in both plan structs, but the trait was less
+  invasive (no field-renaming, no breaking destructuring in
+  test ctors).
 
 ### Learned
--
+- `tokio_postgres::types::ToSql` is bind-type-strict: pass an
+  `i64` (which `QueryParam::Int` becomes) and the server-side
+  `$1` cast must be `bigint`, not `int` — otherwise tokio-postgres
+  errors with "error serializing parameter 0". Documented in the
+  postgres_load_demo comment so the next person reading the
+  example doesn't trip over it.
+- Examples in Cargo packages have access to `[dev-dependencies]`
+  by default — useful to know, since `postgres_load_demo` needs
+  `testcontainers-modules` (a dev-dep) but ships as an example,
+  not a test. No Cargo.toml plumbing required.
+- Generic `evaluate_load<P: LoadProfile>` does not need turbofish
+  at call sites — Rust infers `P` from the `&plan` argument. Means
+  the existing `evaluate_load(&plan, &samples)` call style works
+  unchanged across the refactor, which is what you want from a
+  "make it generic" change.
 
 ### Drift?
--
+- One slip on S-8.4 GREEN — committed `.claude/scheduled_tasks.lock`
+  (a Claude Code runtime artifact) into the repo because
+  `git add -A` swept it up. Caught it within one commit, added
+  to .gitignore, removed from the index in a follow-up `chore:`
+  commit. Future rule: prefer staging specific paths over `-A`
+  when the working tree has untracked runtime files.
