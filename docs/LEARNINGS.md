@@ -12,6 +12,34 @@ Tags: `process`, `tooling`, `architecture`, `perf`, `tdd`, `drift`,
 
 ---
 
+## 2026-05-09 — Defer async PyO3 (`pyo3-asyncio`) to v0.2 `pyo3` `process`
+
+S-9.5 decision: ship v0.1 with sync `def` probes only. `async def`
+support and `pyo3-asyncio` integration land in v0.2.
+
+Rationale (the PI plan flagged this as risk #4):
+- The pytest plugin (S-9.1 / S-9.2) already does what users need
+  for v0.1 — collect probes, run them sequentially, report
+  per-assertion outcomes. None of that requires async on the
+  Python side.
+- `pyo3-asyncio`'s API churned across 0.20→0.21→0.22 (event-loop
+  bridging, runtime selection, send/sync bounds on futures). A
+  spike risked spending the rest of Sprint 9 chasing API shape
+  rather than shipping pytest plugin / flow shim / run history.
+- The Rust engine still uses tokio internally — async-flavored
+  Python probes don't unlock new *engine* capability, only a
+  more ergonomic way for users to do auxiliary I/O inside their
+  probe function. That's a v0.2 polish item, not a v0.1 blocker.
+
+Updated: PRD §6 preamble, §6.6, §16 decision #2 — all flipped
+from "v0.1 supports async" to "v0.1 sync only; async is v0.2".
+
+Why this matters: documenting the deferral as a deliberate
+decision (with the reasoning) keeps a future contributor from
+re-litigating it. The "PRD says async ships in v0.1" sentence
+would otherwise read as a missed feature; the new entry makes
+it a known, dated v0.2 line item.
+
 ## 2026-05-09 — `tokio-postgres` bind types are strict on `$N` casts `rust`
 
 In Sprint 8 the first PostgresLoadAdapter test failed with
