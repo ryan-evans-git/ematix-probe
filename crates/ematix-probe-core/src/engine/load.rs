@@ -47,6 +47,13 @@ pub enum LoadAssertion {
     /// The fraction of non-2xx responses must be below
     /// `threshold` (0.0..=1.0). 0.01 = 1%.
     ErrorRateBelow { threshold: f64 },
+    /// Actual achieved request rate (samples / wall-clock
+    /// seconds) must be at or above `threshold_rps`. Counts
+    /// every attempted request including connection failures —
+    /// this is the "did the scheduler keep up?" assertion.
+    /// Pair with `ErrorRateBelow` if you also want to assert
+    /// the requests succeeded.
+    ThroughputAbove { threshold_rps: f64 },
 }
 
 /// A complete load-probe execution plan.
@@ -83,7 +90,7 @@ pub fn evaluate_load(plan: &LoadPlan, samples: &[Sample]) -> RunSummary {
         .assertions
         .iter()
         .enumerate()
-        .map(|(i, a)| eval_one(i, a, samples))
+        .map(|(i, a)| eval_one(i, a, plan, samples))
         .collect();
     RunSummary {
         verdict: reduce_verdict(&results),
@@ -91,7 +98,12 @@ pub fn evaluate_load(plan: &LoadPlan, samples: &[Sample]) -> RunSummary {
     }
 }
 
-fn eval_one(idx: usize, assertion: &LoadAssertion, samples: &[Sample]) -> AssertionResult {
+fn eval_one(
+    idx: usize,
+    assertion: &LoadAssertion,
+    plan: &LoadPlan,
+    samples: &[Sample],
+) -> AssertionResult {
     match assertion {
         LoadAssertion::P99Under {
             metric,
@@ -99,6 +111,9 @@ fn eval_one(idx: usize, assertion: &LoadAssertion, samples: &[Sample]) -> Assert
         } => eval_p99_under(idx, metric, *threshold_ms, samples),
         LoadAssertion::ErrorRateBelow { threshold } => {
             eval_error_rate_below(idx, *threshold, samples)
+        }
+        LoadAssertion::ThroughputAbove { threshold_rps } => {
+            eval_throughput_above(idx, *threshold_rps, plan.duration, samples)
         }
     }
 }
@@ -186,6 +201,51 @@ fn eval_error_rate_below(idx: usize, threshold: f64, samples: &[Sample]) -> Asse
             verdict: Verdict::Fail,
             message: Some(format!(
                 "error_rate = {rate:.4} ({bad} of {total} samples); expected < {threshold:.4}"
+            )),
+        }
+    }
+}
+
+fn eval_throughput_above(
+    idx: usize,
+    threshold_rps: f64,
+    duration: Duration,
+    samples: &[Sample],
+) -> AssertionResult {
+    if !threshold_rps.is_finite() || threshold_rps < 0.0 {
+        return acc_error(
+            idx,
+            format!("ThroughputAbove: threshold_rps must be >= 0 (got {threshold_rps})"),
+        );
+    }
+    if samples.is_empty() {
+        return acc_error(
+            idx,
+            "ThroughputAbove: no samples to compute rate on".to_string(),
+        );
+    }
+    let secs = duration.as_secs_f64();
+    if secs <= 0.0 {
+        return acc_error(
+            idx,
+            "ThroughputAbove: plan duration is zero (no wall-clock budget)".to_string(),
+        );
+    }
+    let actual_rps = samples.len() as f64 / secs;
+    if actual_rps >= threshold_rps {
+        AssertionResult {
+            assertion_index: idx,
+            verdict: Verdict::Pass,
+            message: None,
+        }
+    } else {
+        AssertionResult {
+            assertion_index: idx,
+            verdict: Verdict::Fail,
+            message: Some(format!(
+                "throughput = {actual_rps:.2} rps ({} samples / {secs:.2}s); \
+                 expected >= {threshold_rps:.2} rps",
+                samples.len()
             )),
         }
     }

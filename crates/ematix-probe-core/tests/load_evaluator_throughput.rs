@@ -54,7 +54,9 @@ fn fails_when_actual_rate_below_threshold() {
     let p = plan(
         Duration::from_secs(1),
         50.0,
-        LoadAssertion::ThroughputAbove { threshold_rps: 50.0 },
+        LoadAssertion::ThroughputAbove {
+            threshold_rps: 50.0,
+        },
     );
     let summary = evaluate_load(&p, &samples);
     assert_eq!(summary.verdict, Verdict::Fail);
@@ -82,7 +84,9 @@ fn errored_samples_still_count_toward_throughput() {
     let p = plan(
         Duration::from_secs(1),
         100.0,
-        LoadAssertion::ThroughputAbove { threshold_rps: 90.0 },
+        LoadAssertion::ThroughputAbove {
+            threshold_rps: 90.0,
+        },
     );
     let summary = evaluate_load(&p, &samples);
     assert_eq!(summary.verdict, Verdict::Pass);
