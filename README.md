@@ -7,7 +7,16 @@ that lets you assert on the *shape* of data sitting in a target (Postgres,
 DuckDB, Parquet on S3) and on the *behavior* of a service under synthetic
 traffic (HTTP, Postgres SQL) — using one declarative API and one CLI.
 
-> Status: **Phase 0** — workspace skeleton. v0.1 not yet released.
+> Status: **Phase 5 closed** (Sprint 8, PI-1) — v0.1 not yet released.
+>
+> What works today: data probes against Postgres / DuckDB / local
+> Parquet / S3 Parquet (`not_null`, `unique`, `between`, `regex`,
+> `enum`, `row_count`, `freshness`, `percentile_between`,
+> `cardinality_between`, `schema_match`); load probes against HTTP
+> and Postgres SQL with constant-rate or virtual-user scheduling
+> (`p99_under`, `error_rate_below`, `throughput_above`,
+> `status_code_in`). Pytest plugin + PyPI release land in
+> Sprints 9–10.
 
 ## Documents
 
