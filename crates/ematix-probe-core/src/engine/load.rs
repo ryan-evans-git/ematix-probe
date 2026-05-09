@@ -54,6 +54,14 @@ pub enum LoadAssertion {
     /// Pair with `ErrorRateBelow` if you also want to assert
     /// the requests succeeded.
     ThroughputAbove { threshold_rps: f64 },
+    /// Every sample's `status_code` must be in `allowed`.
+    /// Connection failures (no `status_code`) count as
+    /// violations. Empty `allowed` is rejected at evaluation
+    /// (asserts nothing — every sample would violate). Use
+    /// alongside or instead of `ErrorRateBelow` when you want
+    /// strict status-code conformance rather than a tolerated
+    /// failure rate.
+    StatusCodeIn { allowed: Vec<u16> },
 }
 
 /// A complete load-probe execution plan.
@@ -115,6 +123,7 @@ fn eval_one(
         LoadAssertion::ThroughputAbove { threshold_rps } => {
             eval_throughput_above(idx, *threshold_rps, plan.duration, samples)
         }
+        LoadAssertion::StatusCodeIn { allowed } => eval_status_code_in(idx, allowed, samples),
     }
 }
 
@@ -246,6 +255,66 @@ fn eval_throughput_above(
                 "throughput = {actual_rps:.2} rps ({} samples / {secs:.2}s); \
                  expected >= {threshold_rps:.2} rps",
                 samples.len()
+            )),
+        }
+    }
+}
+
+fn eval_status_code_in(idx: usize, allowed: &[u16], samples: &[Sample]) -> AssertionResult {
+    if allowed.is_empty() {
+        return acc_error(
+            idx,
+            "StatusCodeIn: allowed set is empty (would violate every sample)".to_string(),
+        );
+    }
+    if samples.is_empty() {
+        return acc_error(idx, "StatusCodeIn: no samples to check".to_string());
+    }
+    // Pre-collect into a HashSet for O(1) membership; allowed
+    // is typically small (1-5 codes) so the constant matters
+    // less than readability.
+    let allowed_set: std::collections::HashSet<u16> = allowed.iter().copied().collect();
+    let mut violations: Vec<String> = Vec::new();
+    for s in samples {
+        match s.status_code {
+            Some(c) if allowed_set.contains(&c) => {}
+            Some(c) => violations.push(format!("tick #{}: status {c}", s.tick_index)),
+            None => violations.push(format!(
+                "tick #{}: connection error ({})",
+                s.tick_index,
+                s.error.as_deref().unwrap_or("unknown")
+            )),
+        }
+    }
+    if violations.is_empty() {
+        AssertionResult {
+            assertion_index: idx,
+            verdict: Verdict::Pass,
+            message: None,
+        }
+    } else {
+        // Truncate the violation list so a 1M-sample run
+        // doesn't produce a 1M-line message.
+        let shown = violations
+            .iter()
+            .take(5)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join(", ");
+        let extra = if violations.len() > 5 {
+            format!(" (+{} more)", violations.len() - 5)
+        } else {
+            String::new()
+        };
+        AssertionResult {
+            assertion_index: idx,
+            verdict: Verdict::Fail,
+            message: Some(format!(
+                "{} sample(s) with status_code outside allowed set {:?}: {}{}",
+                violations.len(),
+                allowed,
+                shown,
+                extra
             )),
         }
     }
