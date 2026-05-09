@@ -8,6 +8,7 @@
 //! `reduce_verdict` from `engine::data` so callers see one
 //! consistent verdict-reduction story across data + load probes.
 
+pub mod postgres;
 pub mod scheduler;
 
 use std::time::Duration;

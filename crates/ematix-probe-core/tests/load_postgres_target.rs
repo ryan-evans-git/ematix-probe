@@ -15,10 +15,7 @@ fn load_query_round_trips_sql_and_params() {
         .param(QueryParam::Int(42))
         .param(QueryParam::Bool(true));
     assert_eq!(q.sql(), "SELECT * FROM users WHERE id = $1 AND active = $2");
-    assert_eq!(
-        q.params(),
-        &[QueryParam::Int(42), QueryParam::Bool(true)]
-    );
+    assert_eq!(q.params(), &[QueryParam::Int(42), QueryParam::Bool(true)]);
 }
 
 #[test]
