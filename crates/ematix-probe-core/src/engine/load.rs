@@ -64,15 +64,27 @@ pub enum LoadAssertion {
     StatusCodeIn { allowed: Vec<u16> },
 }
 
+/// Scheduling discipline. v0.1 ships `ConstantRate` (open
+/// model — fires Ticks at a target RPS regardless of how slow
+/// the target is); `VirtualUsers` (closed model — N concurrent
+/// workers each looping request → wait → request) lands in
+/// S-8.2.
+#[derive(Debug, Clone, Copy, PartialEq)]
+#[non_exhaustive]
+pub enum LoadMode {
+    /// Open-model load. Target throughput in req/s. Real
+    /// throughput on a busy runner may drift below this; the
+    /// scheduler from S-6.4 documents acceptable drift.
+    ConstantRate { rps: f64 },
+}
+
 /// A complete load-probe execution plan.
 #[derive(Debug, Clone)]
 pub struct LoadPlan {
     pub target: HttpTarget,
     pub duration: Duration,
-    /// Constant target throughput in requests per second. Real
-    /// throughput on a slow runner / network may drift below
-    /// this; the scheduler in S-6.4 documents acceptable drift.
-    pub rps: f64,
+    /// Scheduling discipline. See [`LoadMode`].
+    pub mode: LoadMode,
     /// Warmup window. Samples whose `tick_index` falls in
     /// `[0, floor(warmup_secs * rps))` are dropped before
     /// evaluation — first-connection DNS / TLS / connection
@@ -82,6 +94,19 @@ pub struct LoadPlan {
     /// for every assertion.
     pub warmup: Duration,
     pub assertions: Vec<LoadAssertion>,
+}
+
+impl LoadPlan {
+    /// Convenience for the common case where evaluators need
+    /// the per-second tick budget. Returns the configured rps
+    /// for `ConstantRate`; for future modes (VirtualUsers etc)
+    /// returns `None` and the caller should fall back to
+    /// time-based filtering rather than tick-based.
+    pub fn nominal_rps(&self) -> Option<f64> {
+        match self.mode {
+            LoadMode::ConstantRate { rps } => Some(rps),
+        }
+    }
 }
 
 /// One per-tick measurement collected by a load adapter.
@@ -126,9 +151,15 @@ pub fn evaluate_load(plan: &LoadPlan, samples: &[Sample]) -> RunSummary {
         };
     }
 
-    // Filter out samples in the warmup window. Tick i fires at
-    // i / rps seconds; in warmup iff i / rps < warmup_secs.
-    let warmup_ticks = (plan.warmup.as_secs_f64() * plan.rps).floor() as u64;
+    // Filter out samples in the warmup window. For ConstantRate
+    // (the only mode in S-8.1), tick i fires at i / rps seconds,
+    // so "in warmup" iff `i / rps < warmup_secs`. Future modes
+    // without a fixed rps will need a time-based filter on
+    // Sample.elapsed_since_start.
+    let warmup_ticks = match plan.nominal_rps() {
+        Some(rps) => (plan.warmup.as_secs_f64() * rps).floor() as u64,
+        None => 0,
+    };
     let measured: Vec<Sample> = samples
         .iter()
         .filter(|s| s.tick_index >= warmup_ticks)

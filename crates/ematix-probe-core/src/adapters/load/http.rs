@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 
 use crate::adapters::data::AdapterError;
 use crate::engine::load::scheduler::ConstantRateScheduler;
-use crate::engine::load::{LoadPlan, Sample};
+use crate::engine::load::{LoadMode, LoadPlan, Sample};
 
 // `Sample` lives in `engine::load` so evaluators can consume it
 // without the adapters layer being a dep. Re-exported here for
@@ -38,7 +38,10 @@ impl HttpLoadAdapter {
             .build()
             .map_err(|e| AdapterError::Connection(format!("reqwest client: {e}")))?;
 
-        let mut sched = ConstantRateScheduler::new(plan.rps, plan.duration);
+        let rps = match plan.mode {
+            LoadMode::ConstantRate { rps } => rps,
+        };
+        let mut sched = ConstantRateScheduler::new(rps, plan.duration);
         let mut handles = Vec::new();
 
         while let Some(tick) = sched.next_tick().await {

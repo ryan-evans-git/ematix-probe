@@ -11,14 +11,14 @@
 use std::time::Duration;
 
 use ematix_probe_core::engine::load::HttpTarget;
-use ematix_probe_core::engine::load::{evaluate_load, LoadAssertion, LoadPlan, Sample};
+use ematix_probe_core::engine::load::{evaluate_load, LoadAssertion, LoadMode, LoadPlan, Sample};
 use ematix_probe_core::Verdict;
 
 fn plan(assertions: Vec<LoadAssertion>) -> LoadPlan {
     LoadPlan {
         target: HttpTarget::get("http://x.test"),
         duration: Duration::from_secs(1),
-        rps: 1.0,
+        mode: LoadMode::ConstantRate { rps: 1.0 },
         warmup: Duration::ZERO,
         assertions,
     }

@@ -17,7 +17,9 @@ use std::time::Duration;
 
 use ematix_probe_core::adapters::load::http::HttpLoadAdapter;
 use ematix_probe_core::engine::data::Verdict;
-use ematix_probe_core::engine::load::{evaluate_load, HttpTarget, LoadAssertion, LoadPlan};
+use ematix_probe_core::engine::load::{
+    evaluate_load, HttpTarget, LoadAssertion, LoadMode, LoadPlan,
+};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 
@@ -29,7 +31,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let plan = LoadPlan {
         target: HttpTarget::get(format!("{url}200")),
         duration: Duration::from_secs(2),
-        rps: 25.0,
+        mode: LoadMode::ConstantRate { rps: 25.0 },
         warmup: Duration::from_millis(100),
         assertions: vec![
             LoadAssertion::P99Under {
@@ -44,9 +46,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         ],
     };
 
+    let rps = plan.nominal_rps().unwrap_or(0.0);
     println!(
         "Driving {} req/s for {:?} (warmup {:?})...",
-        plan.rps, plan.duration, plan.warmup,
+        rps, plan.duration, plan.warmup,
     );
     let adapter = HttpLoadAdapter::new();
     let samples = adapter.collect_samples(&plan).await?;
