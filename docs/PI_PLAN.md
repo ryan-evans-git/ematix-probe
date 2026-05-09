@@ -39,7 +39,7 @@ they introduce the most new infrastructure.
 | **7** | Phase 4b | Load probe HTTP polish — `throughput_above` / `status_code_in` / warmup; httpbin-style end-to-end example | planned |
 | **8** | Phase 5 | Load probe VU mode + Postgres SQL adapter; query parameterization | **closed 2026-05-09** ([retro](sprints/sprint-08.md#retro-filled-at-sprint-close)) |
 | **9** | Phase 6 + Phase 7 | pytest plugin + `ematix-flow` integration shim + opt-in run history persistence | **closed 2026-05-09** ([retro](sprints/sprint-09.md#retro-filled-at-sprint-close)) |
-| **10** | Phase 8 + Phase 9 | `explain` / `doctor` polish + docs + v0.1 PyPI release | planned |
+| **10** | Phase 8 + Phase 9 | `explain` / `doctor` polish + docs + v0.1 PyPI release | **closed 2026-05-09** ([retro](sprints/sprint-10.md#retro-filled-at-sprint-close)) |
 
 A sprint that overruns drops scope to the next sprint, not pushes the
 PI date. PI-1 length is fixed; what changes is what fits.

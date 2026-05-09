@@ -42,6 +42,14 @@ classifiers = [
 Repository = "https://github.com/ryan-evans-git/ematix-probe"
 Issues = "https://github.com/ryan-evans-git/ematix-probe/issues"
 
+[project.scripts]
+# Console-script entry point. `pip install ematix-probe` produces
+# an `ematix-probe` command on PATH that dispatches to
+# `ematix_probe.cli.main`. The Rust binary at
+# `crates/ematix-probe-cli` stays as workspace scaffolding but
+# isn't user-facing — probe discovery lives where probes live.
+ematix-probe = "ematix_probe.cli:main"
+
 [project.entry-points."pytest11"]
 # Auto-load the ematix-probe pytest plugin when the package is
 # installed, so `@probe.data` instances become pytest items
