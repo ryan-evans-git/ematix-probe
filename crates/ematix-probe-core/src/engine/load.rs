@@ -76,6 +76,11 @@ pub enum LoadMode {
     /// throughput on a busy runner may drift below this; the
     /// scheduler from S-6.4 documents acceptable drift.
     ConstantRate { rps: f64 },
+    /// Closed-model load. `count` concurrent virtual users
+    /// each loop "request → wait → request" until the plan
+    /// duration elapses. Achieved RPS depends on per-request
+    /// latency.
+    VirtualUsers { count: usize },
 }
 
 /// A complete load-probe execution plan.
@@ -105,6 +110,7 @@ impl LoadPlan {
     pub fn nominal_rps(&self) -> Option<f64> {
         match self.mode {
             LoadMode::ConstantRate { rps } => Some(rps),
+            LoadMode::VirtualUsers { .. } => None,
         }
     }
 }
