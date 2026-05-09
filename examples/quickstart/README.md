@@ -21,9 +21,12 @@ python examples/quickstart/run.py
 # Or any of the Phase 2 scan-path backends — no Docker needed:
 python examples/quickstart/run.py --source duckdb
 python examples/quickstart/run.py --source parquet
+
+# Or hit S3 via LocalStack (Docker required):
+python examples/quickstart/run.py --source s3
 ```
 
-`postgres` requires Docker running locally; `duckdb` and
+`postgres` and `s3` require Docker running locally; `duckdb` and
 `parquet` are in-process and need nothing beyond the project's
 dev extras.
 

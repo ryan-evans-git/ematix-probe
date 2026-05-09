@@ -136,10 +136,64 @@ def _run_parquet():
         return _build_probe(source.parquet(parquet_path)).run()
 
 
+def _run_s3():
+    # LocalStack-backed S3 demo. DuckDB writes a parquet file
+    # locally, then we boto3-upload it into a LocalStack bucket.
+    import os
+
+    import boto3
+    from testcontainers.localstack import LocalStackContainer
+
+    bucket = "ematix-quickstart"
+    key = "users.parquet"
+
+    # The Rust S3 adapter reads credentials via the standard AWS
+    # resolver chain (env vars first). LocalStack accepts any
+    # creds, but they have to be set so the chain doesn't fall
+    # through to IMDS lookup.
+    os.environ.setdefault("AWS_ACCESS_KEY_ID", "test")
+    os.environ.setdefault("AWS_SECRET_ACCESS_KEY", "test")
+
+    print("Starting LocalStack (S3 only) testcontainer...", flush=True)
+    with LocalStackContainer(image="localstack/localstack:3.0").with_services("s3") as ls:
+        endpoint = ls.get_url()
+        print(f"  -> {endpoint}", flush=True)
+        s3 = boto3.client(
+            "s3",
+            endpoint_url=endpoint,
+            region_name="us-east-1",
+            aws_access_key_id="test",
+            aws_secret_access_key="test",
+        )
+        s3.create_bucket(Bucket=bucket)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            parquet_path = str(Path(tmp) / "users.parquet")
+            seed_db = str(Path(tmp) / "seed.duckdb")
+            print("Writing seed Parquet via DuckDB...", flush=True)
+            duckdb_setup(
+                seed_db,
+                DUCKDB_SEED + f"\nCOPY users TO '{parquet_path}' (FORMAT PARQUET);",
+            )
+            print(f"Uploading to s3://{bucket}/{key} ...", flush=True)
+            s3.upload_file(parquet_path, bucket, key)
+
+        print("Uploaded; running probe.", flush=True)
+        return _build_probe(
+            source.s3_parquet(
+                bucket=bucket,
+                key=key,
+                region="us-east-1",
+                endpoint_url=endpoint,
+            )
+        ).run()
+
+
 _SOURCES = {
     "postgres": _run_postgres,
     "duckdb": _run_duckdb,
     "parquet": _run_parquet,
+    "s3": _run_s3,
 }
 
 

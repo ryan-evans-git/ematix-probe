@@ -8,6 +8,14 @@ bandit==1.9.4
     # via ematix-probe (pyproject.toml)
 boolean-py==5.0
     # via license-expression
+boto3==1.43.6
+    # via
+    #   ematix-probe (pyproject.toml)
+    #   testcontainers
+botocore==1.43.6
+    # via
+    #   boto3
+    #   s3transfer
 build==1.5.0
     # via pip-tools
 cachecontrol[filecache]==0.14.4
@@ -34,6 +42,10 @@ idna==3.13
     # via requests
 iniconfig==2.3.0
     # via pytest
+jmespath==1.1.0
+    # via
+    #   boto3
+    #   botocore
 license-expression==30.4.4
     # via cyclonedx-python-lib
 markdown-it-py==4.2.0
@@ -94,6 +106,8 @@ pytest-asyncio==1.3.0
     # via ematix-probe (pyproject.toml)
 pytest-cov==7.1.0
     # via ematix-probe (pyproject.toml)
+python-dateutil==2.9.0.post0
+    # via botocore
 python-dotenv==1.2.2
     # via testcontainers
 pyyaml==6.0.3
@@ -109,11 +123,15 @@ rich==15.0.0
     #   pip-audit
 ruff==0.15.12
     # via ematix-probe (pyproject.toml)
+s3transfer==0.17.0
+    # via boto3
+six==1.17.0
+    # via python-dateutil
 sortedcontainers==2.4.0
     # via cyclonedx-python-lib
 stevedore==5.7.0
     # via bandit
-testcontainers[postgres]==4.14.2
+testcontainers[localstack,postgres]==4.14.2
     # via ematix-probe (pyproject.toml)
 tomli==2.4.1
     # via pip-audit
@@ -123,6 +141,7 @@ typing-extensions==4.15.0
     # via testcontainers
 urllib3==2.7.0
     # via
+    #   botocore
     #   docker
     #   requests
     #   testcontainers
