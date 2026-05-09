@@ -17,7 +17,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
-
 from ematix_probe.cli import main
 from ematix_probe.probe import DataProbe
 from ematix_probe.report import AssertionResult, RunReport

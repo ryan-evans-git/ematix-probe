@@ -1,9 +1,9 @@
 # Sprint 10 — Phase 8 + Phase 9: explain / doctor polish + v0.1 PyPI release
 
-Dates: TBD (opens once PR for `phase-7` from Sprint 9 merges)
+Dates: 2026-05-09 → 2026-05-15
 PI: PI-1 (final sprint)
 Phase: Phase 8 + Phase 9
-Status: **planned**
+Status: **active** *(opened 2026-05-09 after PR #12 merged)*
 
 ## Goal
 
