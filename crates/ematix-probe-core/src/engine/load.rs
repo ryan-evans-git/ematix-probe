@@ -73,6 +73,14 @@ pub struct LoadPlan {
     /// throughput on a slow runner / network may drift below
     /// this; the scheduler in S-6.4 documents acceptable drift.
     pub rps: f64,
+    /// Warmup window. Samples whose `tick_index` falls in
+    /// `[0, floor(warmup_secs * rps))` are dropped before
+    /// evaluation — first-connection DNS / TLS / connection
+    /// setup skews early latencies. `Duration::ZERO` (the
+    /// default) means no warmup. Must be strictly less than
+    /// `duration` or `evaluate_load` returns `Verdict::Error`
+    /// for every assertion.
+    pub warmup: Duration,
     pub assertions: Vec<LoadAssertion>,
 }
 
@@ -94,11 +102,44 @@ pub struct Sample {
 /// Mirrors `engine::scan::evaluate` for data probes — produces
 /// a `RunSummary` with one `AssertionResult` per `LoadAssertion`.
 pub fn evaluate_load(plan: &LoadPlan, samples: &[Sample]) -> RunSummary {
+    // Warmup must leave a non-empty measurable window. Surfaces
+    // as Error per assertion so callers see a clear diagnostic
+    // rather than e.g. a divide-by-zero panic in throughput.
+    if plan.warmup >= plan.duration {
+        let results: Vec<AssertionResult> = plan
+            .assertions
+            .iter()
+            .enumerate()
+            .map(|(i, _)| {
+                acc_error(
+                    i,
+                    format!(
+                        "warmup ({:?}) must be < duration ({:?}) — no measurable window",
+                        plan.warmup, plan.duration
+                    ),
+                )
+            })
+            .collect();
+        return RunSummary {
+            verdict: reduce_verdict(&results),
+            assertions: results,
+        };
+    }
+
+    // Filter out samples in the warmup window. Tick i fires at
+    // i / rps seconds; in warmup iff i / rps < warmup_secs.
+    let warmup_ticks = (plan.warmup.as_secs_f64() * plan.rps).floor() as u64;
+    let measured: Vec<Sample> = samples
+        .iter()
+        .filter(|s| s.tick_index >= warmup_ticks)
+        .cloned()
+        .collect();
+
     let results: Vec<AssertionResult> = plan
         .assertions
         .iter()
         .enumerate()
-        .map(|(i, a)| eval_one(i, a, plan, samples))
+        .map(|(i, a)| eval_one(i, a, plan, &measured))
         .collect();
     RunSummary {
         verdict: reduce_verdict(&results),
@@ -121,7 +162,11 @@ fn eval_one(
             eval_error_rate_below(idx, *threshold, samples)
         }
         LoadAssertion::ThroughputAbove { threshold_rps } => {
-            eval_throughput_above(idx, *threshold_rps, plan.duration, samples)
+            // Effective measurement window = duration - warmup.
+            // (Already validated > 0 by the warmup guard in
+            // evaluate_load before we get here.)
+            let effective = plan.duration.saturating_sub(plan.warmup);
+            eval_throughput_above(idx, *threshold_rps, effective, samples)
         }
         LoadAssertion::StatusCodeIn { allowed } => eval_status_code_in(idx, allowed, samples),
     }

@@ -16,6 +16,7 @@ fn plan(assertion: LoadAssertion) -> LoadPlan {
         target: HttpTarget::get("http://x.test"),
         duration: Duration::from_secs(1),
         rps: 1.0,
+        warmup: Duration::ZERO,
         assertions: vec![assertion],
     }
 }
@@ -68,9 +69,7 @@ fn connection_errors_count_as_violations() {
         s(0, Some(200), None),
         s(1, None, Some("connection refused")),
     ];
-    let p = plan(LoadAssertion::StatusCodeIn {
-        allowed: vec![200],
-    });
+    let p = plan(LoadAssertion::StatusCodeIn { allowed: vec![200] });
     let summary = evaluate_load(&p, &samples);
     assert_eq!(summary.verdict, Verdict::Fail);
 }
@@ -89,9 +88,7 @@ fn empty_allowed_yields_error() {
 
 #[test]
 fn empty_samples_yields_error() {
-    let p = plan(LoadAssertion::StatusCodeIn {
-        allowed: vec![200],
-    });
+    let p = plan(LoadAssertion::StatusCodeIn { allowed: vec![200] });
     let summary = evaluate_load(&p, &[]);
     assert_eq!(summary.verdict, Verdict::Error);
 }

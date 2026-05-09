@@ -71,6 +71,7 @@ async fn collects_one_sample_per_tick() {
         target: HttpTarget::get(&url),
         duration: Duration::from_millis(500),
         rps: 10.0,
+        warmup: Duration::ZERO,
         assertions: vec![],
     };
     let adapter = HttpLoadAdapter::new();
@@ -98,6 +99,7 @@ async fn surfaces_5xx_status_codes() {
         target: HttpTarget::get(&url),
         duration: Duration::from_millis(300),
         rps: 10.0,
+        warmup: Duration::ZERO,
         assertions: vec![],
     };
     let adapter = HttpLoadAdapter::new();
@@ -121,6 +123,7 @@ async fn unreachable_target_yields_error_samples() {
         target: HttpTarget::get("http://127.0.0.1:1/"),
         duration: Duration::from_millis(300),
         rps: 5.0,
+        warmup: Duration::ZERO,
         assertions: vec![],
     };
     let adapter = HttpLoadAdapter::new();

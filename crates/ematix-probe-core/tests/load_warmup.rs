@@ -49,7 +49,11 @@ fn warmup_drops_early_samples_for_p99() {
     };
     let summary = evaluate_load(&plan, &samples);
     // Without warmup, p99 ≈ 1000ms → fail. With warmup, ≈10ms → pass.
-    assert_eq!(summary.verdict, Verdict::Pass, "warmup should hide the slow head: {summary:?}");
+    assert_eq!(
+        summary.verdict,
+        Verdict::Pass,
+        "warmup should hide the slow head: {summary:?}"
+    );
 }
 
 #[test]
@@ -77,7 +81,9 @@ fn warmup_zero_is_default_and_filters_nothing() {
         duration: Duration::from_secs(1),
         rps: 10.0,
         warmup: Duration::ZERO,
-        assertions: vec![LoadAssertion::ThroughputAbove { threshold_rps: 10.0 }],
+        assertions: vec![LoadAssertion::ThroughputAbove {
+            threshold_rps: 10.0,
+        }],
     };
     let summary = evaluate_load(&plan, &samples);
     assert_eq!(summary.verdict, Verdict::Pass);
