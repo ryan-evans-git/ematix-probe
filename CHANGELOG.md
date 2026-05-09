@@ -7,6 +7,20 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+(no changes since v0.1.0)
+
+## [0.1.0] - 2026-05-09
+
+First public release. PI-1 complete: data probes (Postgres /
+DuckDB / Parquet local + S3) and load probes (HTTP / Postgres SQL,
+constant-rate + virtual-user schedulers), pytest plugin with
+per-assertion test nodes, ematix-flow integration shim, opt-in
+sqlite run history, and the `ematix-probe` Python CLI.
+
+See [`docs/PI_1_RETRO.md`](docs/PI_1_RETRO.md) for the cross-PI
+retrospective. Changes below are grouped by sprint as they shipped
+during PI-1.
+
 ### Added — Phase 8 + Phase 9 (Sprint 10, PI-1 close)
 
 - **Python CLI** (`ematix-probe` console-script via

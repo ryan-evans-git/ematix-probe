@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "ematix-probe"
-version = "0.1.0.dev0"
+version = "0.1.0"
 description = "Declarative testing automation: data probes + load probes, on a Rust core. Assert on the shape of data in Postgres / DuckDB / Parquet (local + S3) and on the behavior of HTTP and SQL services under synthetic load — using one declarative API and one CLI."
 readme = "README.md"
 requires-python = ">=3.10"

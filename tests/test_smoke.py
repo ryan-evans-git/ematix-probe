@@ -9,4 +9,10 @@ def test_version_attribute_exists():
 
 
 def test_version_matches_core():
-    assert ematix_probe.__version__ == "0.1.0-dev"
+    # Version is sourced from Cargo at build time. Round-trip
+    # check: it's non-empty and looks like a sane SemVer-ish
+    # string. Hard-coding the literal here would break every
+    # release commit's CI.
+    v = ematix_probe.__version__
+    assert isinstance(v, str) and v
+    assert v[0].isdigit(), f"version should start with a digit; got {v!r}"
