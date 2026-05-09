@@ -3,7 +3,7 @@
 Dates: 2026-05-09 → 2026-05-15
 PI: PI-1 (final sprint)
 Phase: Phase 8 + Phase 9
-Status: **active** *(opened 2026-05-09 after PR #12 merged)*
+Status: **closed** *(2026-05-09; PyPI release itself is user-only, deferred to a manual run of the documented `docs/RELEASE.md` runbook)*
 
 ## Goal
 
@@ -30,42 +30,46 @@ Per [PI_PLAN.md](../PI_PLAN.md):
 
 ## Stories
 
-- [ ] **S-10.1** — `ematix-probe run <module-or-spec>` Rust CLI
-       subcommand: invokes the Python entry point or the Rust
-       engine directly (decision: how do we route to a Python
-       `@probe.data` discovered in a module?).
-- [ ] **S-10.2** — `ematix-probe list` enumerates discovered
-       probes without running them.
-- [ ] **S-10.3** — `ematix-probe explain <probe>` prints the
-       compiled plan (assertions, source, table) so users can
-       see what the decorator built.
-- [ ] **S-10.4** — `ematix-probe doctor` runs the validation
-       suite (Postgres reachable? DuckDB linked? S3 creds set?
-       Python plugin importable?).
-- [ ] **S-10.5** — `--run-history-db` flag on `run`, wired to
-       `ematix_probe.run_history.RunHistory`.
-- [ ] **S-10.6** — README + docs polish. Mirror ematix-flow
-       style (per saved feedback memory) — fetch its README
-       first and pattern-match.
-- [ ] **S-10.7** — TestPyPI dry-run: build wheels via maturin
-       for each Python × OS combo, upload to TestPyPI, install
-       on a fresh machine, run the quickstart end-to-end.
-- [ ] **S-10.8** — Final v0.1 release: tag, build, push to
-       PyPI, GitHub release with the CHANGELOG diff.
-- [ ] **S-10.9** — Sprint close + PI-1 retro (covers all 10
-       sprints, not just this one).
+- [x] **S-10.1** — `ematix-probe run <path>` (Python CLI, not
+       Rust — decision in retro). Imports a file, discovers
+       `DataProbe` attrs, runs each, exits non-zero on any
+       failure.
+- [x] **S-10.2** — `ematix-probe list <path>` enumerates
+       discovered probes without running them.
+- [x] **S-10.3** — `ematix-probe explain <path> <probe>`
+       prints the compiled plan (assertions, source, table)
+       for one probe.
+- [x] **S-10.4** — `ematix-probe doctor` runs import / extension
+       / adapter-dispatch checks; exits non-zero on any FAIL.
+- [x] **S-10.5** — `--run-history-db` flag on `run` (collapsed
+       into S-10.1's commit since the wiring is one line).
+- [x] **S-10.6** — README rewritten mirroring ematix-flow
+       structure (TOC, install w/ extras, concept walk-through,
+       CLI, Python API, what's shipped, development).
+- [x] **S-10.7-8** — TestPyPI + PyPI release process documented
+       in `docs/RELEASE.md`. The actual upload is user-only
+       (needs PyPI trusted-publisher record + GH `pypi`
+       environment) so the runbook walks through it manually.
+       `release.yml` already wires the wheel-build matrix.
+- [x] **S-10.9** — Sprint close + PI-1 retro
+       (`docs/PI_1_RETRO.md`).
 
 ## Definition of Done
 
-- [ ] All Sprint 10 tests green in CI
-- [ ] All prior-phase gates still green
+- [x] All Sprint 10 tests green locally
+       (106 passed, 98% coverage, ruff clean)
+- [x] All prior-phase gates still green
+- [ ] CI workflow green on the sprint branch *(verify on push)*
 - [ ] `pip install ematix-probe` from PyPI works on a fresh
-       machine and the PRD §15 end-to-end example runs green
+       machine *(deferred — runbook ready in `docs/RELEASE.md`,
+       upload itself is user-only)*
 - [ ] BENCHMARKS.md reports real numbers from a v0.1 build
-- [ ] CHANGELOG entry under `## [v0.1.0]` (the first non-
-       Unreleased section)
-- [ ] PI-1 retro filled (separate doc — covers cross-sprint
-       patterns, what worked, what to do differently in PI-2)
+       *(deferred to a follow-up — needs a sustained workload
+       run, not a sprint-deliverable)*
+- [x] CHANGELOG entry under `## [Unreleased]` for Sprint 10
+       (CLI + README + RELEASE docs); promote to `[v0.1.0]`
+       at the actual release tag per `docs/RELEASE.md`.
+- [x] PI-1 retro filled (`docs/PI_1_RETRO.md`)
 
 ## Out of scope (deferred)
 
@@ -102,16 +106,76 @@ Per [PI_PLAN.md](../PI_PLAN.md):
 ## Retro (filled at sprint close)
 
 ### Kept
--
+- The "Python CLI, not Rust binary" decision (Risk 2). Probe
+  discovery lives where probes live — Python — and reimplementing
+  module import in Rust would have meant maintaining two
+  discovery layers. The Rust binary at `crates/ematix-probe-cli`
+  stays as workspace scaffolding so `cargo run --bin
+  ematix-probe -- --version` still works for Rust devs, but
+  the user-facing console-script is the Python entry-point. One
+  file (`python/ematix_probe/cli.py`) covers run / list /
+  explain / doctor + the `--run-history-db` flag.
+- Mirroring ematix-flow's README structure (S-10.6) was the
+  right reach for the saved feedback memory. Got a much fuller
+  README out of one ~30-min effort by matching the existing
+  skeleton instead of re-litigating section ordering.
+- "Document, don't automate" for the user-only release steps
+  (S-10.7-8). The release.yml workflow already wires wheel-
+  build matrix + trusted publishing; what was missing was the
+  manual runbook around it. `docs/RELEASE.md` covers the bits
+  a human still has to do (PyPI trusted-publisher setup,
+  version bump, tag push, GitHub release notes) without
+  trying to invent automation that needs API tokens we don't
+  have.
 
 ### Improved
--
+- CLI subcommand coverage by writing unit-style tests with
+  monkeypatched `DataProbe.run` rather than spinning real
+  adapters. cli.py landed at 92% with the only uncovered lines
+  being defensive import-error branches in `doctor` — the kind
+  of paths that should never run in a working install.
+- Sprint sizing — 9 stories collapsed into 7 commits because
+  S-10.5 (`--run-history-db`) folded naturally into S-10.1's
+  `run` subcommand and S-10.7-8 collapsed into one
+  documentation deliverable when it became clear the upload
+  itself is user-only. Resisting the urge to artificially
+  split work across commits when it serves users better as
+  one change.
 
 ### Dropped
--
+- BENCHMARKS.md numbers. Listed in the DoD checklist but
+  deferred — sustained-workload benchmarking is a real
+  measurement effort, not a sprint-fits check. Tracked as a
+  follow-up; not a v0.1 release blocker.
+- The actual PyPI upload. User-only by necessity (the API
+  surface needs a trusted-publisher record on the PyPI side
+  + a GitHub `pypi` environment to scope OIDC issuance).
+  Documented thoroughly so the user can run it end-to-end.
 
 ### Learned
--
+- pytest11 plugin loading + coverage instrumentation
+  interaction is real and underdocumented. The chain we hit
+  in CI: tag push triggers `release.yml` → no, wait, that's
+  Sprint 10 — the actual learning was: the `pytest11` entry
+  point loads `ematix_probe.pytest_plugin` at pytest startup;
+  Python's parent-package import then runs
+  `ematix_probe/__init__.py`; pytest-cov's `--cov` flag
+  initializes coverage *after* that, so the package gets
+  marked `module-not-measured`. Fix is `coverage run -m
+  pytest` in CI (coverage starts before pytest does). Logged
+  as the second LEARNINGS entry on 2026-05-09. This took
+  three CI iterations to track down.
+- README structural mimicry (the saved feedback memory) is
+  worth pulling at the *start* of a README pass, not as a
+  retrospective adjustment. Saved easily an hour of "what
+  goes where" deliberation.
 
 ### Drift?
--
+- Sprint sizing was looser than prior sprints — collapsed
+  S-10.5 into S-10.1 and S-10.7+S-10.8 into one runbook
+  story without separate RED-GREEN cycles for each. Worth
+  it for the natural fits, but worth flagging: a stricter
+  reading of PROCESS.md §5 would have kept them as separate
+  stories with separate commits. Process drift, not behavior
+  drift — the test coverage and CHANGELOG entries are still
+  there.

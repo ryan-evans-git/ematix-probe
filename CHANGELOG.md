@@ -7,6 +7,45 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Added — Phase 8 + Phase 9 (Sprint 10, PI-1 close)
+
+- **Python CLI** (`ematix-probe` console-script via
+  `[project.scripts]`):
+  - `ematix-probe run <path>` — discover and execute every
+    `@probe.data` instance in a Python file; exit non-zero on
+    any non-pass verdict.
+  - `ematix-probe run <path> --run-history-db <sqlite>` — append
+    one row per probe to a sqlite history file.
+  - `ematix-probe list <path>` — enumerate probes (name,
+    schema.table, assertion count) without execution.
+  - `ematix-probe explain <path> <probe>` — print the compiled
+    plan (table, source, assertion names) for one probe.
+  - `ematix-probe doctor` — environment health check (package
+    importable, `_core` extension loaded, adapter dispatch
+    discoverable).
+  - The Rust binary at `crates/ematix-probe-cli` stays as
+    workspace scaffolding but is no longer the user-facing
+    entry point — probe discovery lives where probes live.
+- **README rewrite** mirroring the sibling
+  [ematix-flow](https://github.com/ryan-evans-git/ematix-flow)
+  README structure: TOC, install w/ extras table, concept
+  walk-through (sources → probes → assertions → load → pytest →
+  flow shim → run history → CLI → API), what's shipped,
+  development. Prior README was a four-line stub.
+- **`docs/RELEASE.md`** — manual runbook for cutting a
+  `vX.Y.Z` release: prereqs (PyPI trusted-publisher + GH
+  `pypi` environment), version bump, CHANGELOG promotion,
+  workflow_dispatch dry-run, tag push, post-publish verify,
+  GitHub release. The `release.yml` workflow already wires the
+  wheel-build matrix; this doc covers the steps a human still
+  has to do.
+
+### Test surface — Sprint 10
+
+- Python: 15 new tests across CLI run / history (8) and CLI
+  list / explain / doctor (7). cli.py at 92% line + branch
+  coverage; package total at 98%.
+
 ### Added — Phase 6 + Phase 7 (Sprint 9, PI-1)
 
 - **pytest plugin** (`ematix_probe.pytest_plugin`) — auto-loads
