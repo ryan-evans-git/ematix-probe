@@ -991,7 +991,7 @@ checksum = "48c757948c5ede0e46177b7add2e67155f70e33c07fea8284df6576da70b3719"
 
 [[package]]
 name = "ematix-probe-cli"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "clap",
  "ematix-probe-core",
@@ -999,7 +999,7 @@ dependencies = [
 
 [[package]]
 name = "ematix-probe-core"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "arrow",
  "async-trait",
@@ -1018,7 +1018,7 @@ dependencies = [
 
 [[package]]
 name = "ematix-probe-py"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "ematix-probe-core",
  "pyo3",
