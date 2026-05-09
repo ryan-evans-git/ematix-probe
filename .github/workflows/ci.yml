@@ -148,8 +148,19 @@ jobs:
           pip-licenses --fail-on='Affero;Server Side Public License;Business Source License;Commons Clause;Elastic License;Hippocratic;(GPLv2);(GPLv3)' \
             --format=markdown --with-urls
       - name: Test
-        # `--cov-branch` enables branch coverage measurement;
-        # `--cov-fail-under=90` fails the job (and therefore the PR)
-        # if total branch coverage across `ematix_probe` falls below
-        # 90%. Threshold applies to the whole codebase, not just diff.
-        run: pytest --cov=ematix_probe --cov-branch --cov-fail-under=90 --cov-report=term-missing --cov-report=xml
+        # Run coverage as the entry point (`coverage run -m pytest`)
+        # rather than `pytest --cov`. The pytest11 entry point loads
+        # `ematix_probe.pytest_plugin` at pytest startup, which (via
+        # Python's package import semantics) also runs
+        # `ematix_probe/__init__.py`. With `pytest --cov`, coverage
+        # initialization happens *after* that — so `ematix_probe` is
+        # already imported when measurement starts and gets flagged
+        # `module-not-measured`, dragging total coverage to ~70%.
+        # `coverage run` starts measurement before pytest loads, so
+        # the plugin import is tracked normally.
+        # `--cov-branch` lives in `[tool.coverage.run] branch = true`
+        # in pyproject.toml, so no flag needed here.
+        run: |
+          coverage run -m pytest
+          coverage report --fail-under=90 --show-missing
+          coverage xml

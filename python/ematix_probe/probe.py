@@ -256,6 +256,14 @@ class DataProbe:
             finished_at=finished_at,
         )
 
+    def assertion_names(self) -> list[str]:
+        """Human labels for every assertion in the probe, in plan
+        order. Used by the pytest plugin (S-9.2) to fan a probe out
+        into one pytest item per assertion. Names match what
+        ``RunReport.assertions[i].name`` will carry, so tooling can
+        join the two by index."""
+        return [_assertion_name(spec) for spec in self._specs]
+
     @property
     def source(self) -> Source:
         return self._source

@@ -42,6 +42,20 @@ classifiers = [
 Repository = "https://github.com/ryan-evans-git/ematix-probe"
 Issues = "https://github.com/ryan-evans-git/ematix-probe/issues"
 
+[project.entry-points."pytest11"]
+# Auto-load the ematix-probe pytest plugin when the package is
+# installed, so `@probe.data` instances become pytest items
+# without users wiring `pytest_plugins` themselves.
+#
+# IMPORTANT: the LHS (entry-point name) must equal the dotted
+# module path on the RHS. pluggy uses the LHS as the registration
+# name; if a conftest also lists this module via
+# `pytest_plugins = ["ematix_probe.pytest_plugin"]` (which our
+# own tests do), pluggy registers it again under that dotted-name
+# and refuses if the names disagree:
+#   ValueError: Plugin already registered under a different name
+"ematix_probe.pytest_plugin" = "ematix_probe.pytest_plugin"
+
 [project.optional-dependencies]
 dev = [
     "pytest>=8.0",

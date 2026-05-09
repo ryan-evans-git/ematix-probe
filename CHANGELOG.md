@@ -7,6 +7,54 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Added — Phase 6 + Phase 7 (Sprint 9, PI-1)
+
+- **pytest plugin** (`ematix_probe.pytest_plugin`) — auto-loads
+  via the `pytest11` entry point. Discovers `DataProbe`
+  instances at module top level and surfaces each one as a
+  `DataProbeCollector` that yields one pytest item per
+  assertion. Per-assertion fan-out gives CI a red/green node
+  per check rather than one per probe; `RunReport` is cached
+  on the collector so `.run()` fires exactly once regardless
+  of how many assertions a probe declares.
+- **`ematix-flow` integration shim** (`ematix_probe.flow`) —
+  `probe_from_table(table_cls, *, source, extend=None)` builds
+  a `DataProbe` from any class implementing the duck-typed
+  table protocol (`__tablename__`, optional `__schema__`,
+  iterable `columns` with `.name / .nullable / .primary_key`).
+  Auto-derives `not_null` on non-nullable columns and `unique`
+  on PKs; `extend` lets callers layer extra assertions through
+  the same fluent `Tester`. Zero hard dependency on
+  `ematix-flow` per PRD §6.2.
+- **Opt-in run-history persistence**
+  (`ematix_probe.run_history.RunHistory(path)`) — stdlib-sqlite3
+  persister with a two-table schema (`runs` + `assertions`)
+  and PRAGMA `user_version` for future migrations. One row per
+  probe execution + one per assertion, joined by `run_id`. No
+  new dependency.
+- **`DataProbe.assertion_names()`** — public accessor returning
+  human labels in plan order. Used by the pytest plugin to
+  name per-assertion items; also useful for any caller that
+  wants to introspect a probe before running it.
+
+### Decisions — Sprint 9
+
+- **Async PyO3 deferred to v0.2.** v0.1 ships sync `def`
+  probes only. PRD §6 / §6.6 / §16 updated; rationale in
+  LEARNINGS (2026-05-09). PI risk #4 escape hatch taken
+  deliberately to protect the rest of the sprint budget.
+- **`--run-history-db` CLI flag deferred.** The Rust CLI is
+  still a `--version` skeleton; flag wiring lands when the
+  CLI grows the `run` / `list` / `explain` subcommands in
+  Sprint 10. The `RunHistory` persistence layer itself shipped.
+
+### Test surface — Sprint 9
+
+- Python: 14 new tests across plugin scaffold (3),
+  per-assertion reporting (3), flow shim (5), run history (6).
+  All in-process pytester-based — no maturin reinstall
+  required to validate the plugin entry-point flow at dev time.
+
 ### Added — Phase 5 (Sprint 8, PI-1)
 
 - **VU (virtual-user) closed-model load** alongside the existing

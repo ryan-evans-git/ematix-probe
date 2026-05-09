@@ -167,11 +167,11 @@ its own:
 
 ## 6. Public API (Python)
 
-Decorated probe functions may be either `def` or `async def`. The Rust
-engine drives both — a sync function runs in a worker thread; an async
-function is awaited on the engine's tokio runtime via `pyo3-asyncio`.
-This matters most for load probes whose scenarios issue auxiliary
-async I/O (e.g. fetching a fresh JWT before each VU loop).
+**v0.1: sync `def` probes only.** Async support (`async def` probes,
+`pyo3-asyncio` bridging into the engine's tokio runtime) is deferred
+to v0.2 — see PI_PLAN risk #4 and the 2026-05-09 LEARNINGS entry.
+The §6.5 async load-probe example below is the v0.2 shape, kept for
+forward reference; it does not run in v0.1.
 
 ### 6.1 Data probe — fluent style
 
@@ -282,8 +282,8 @@ def test_dim_passes(report):
 
 A failing `@probe.*` decorator function under pytest fails the test
 naturally; the explicit fixture above is for advanced cases (custom
-reporting, per-test parameterization). Async probe functions integrate
-with `pytest-asyncio` without extra wiring.
+reporting, per-test parameterization). Async probe functions +
+`pytest-asyncio` integration are v0.2 — see §6 preamble.
 
 ## 7. CLI surface
 
@@ -466,10 +466,12 @@ implementation. (Per project convention.)
 1. **Name** → `ematix-probe`. PyPI: `ematix-probe`. Python import:
    `ematix_probe`. CLI binary: `ematix-probe` (no shorter alias shipped;
    users who want one can alias `ep=ematix-probe`).
-2. **Async Python API** → supported in v0.1. Both `@probe.data` and
-   `@probe.load` accept `def` and `async def`. The Rust engine drives
-   sync functions on a worker thread and async functions on its tokio
-   runtime via `pyo3-asyncio`. (See §6 preamble.)
+2. **Async Python API** → **deferred to v0.2**. v0.1 ships sync
+   `def` probes only. The Rust engine still uses tokio internally;
+   the pyo3 boundary is sync. Decision made in Sprint 9 (S-9.5)
+   per PI risk #4 — pyo3-asyncio API churn made the spike too
+   risky for the v0.1 budget. See §6 preamble + 2026-05-09
+   LEARNINGS entry.
 3. **`probe.flow_table` location** → lives in `ematix_probe.ematix_flow`.
    The generic `ematix_probe` core has zero `ematix-flow` dependency; the
    integration shim is optional and only imported when `ematix-flow` is
