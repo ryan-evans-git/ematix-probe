@@ -7,6 +7,54 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Added — Phase 5 (Sprint 8, PI-1)
+
+- **VU (virtual-user) closed-model load** alongside the existing
+  open-model constant-rate scheduler:
+  - New `LoadMode` enum (`non_exhaustive`) with two variants:
+    `ConstantRate { rps }` (open) and `VirtualUsers { count }`
+    (closed). `LoadPlan.rps` is replaced by `LoadPlan.mode`.
+  - `engine::load::scheduler::VuPool` — N concurrent workers
+    each looping `request → wait → request` until the plan
+    duration elapses. Per-tick `tick_index` assigned by an
+    atomic counter; output sorted by `tick_index`.
+  - `HttpLoadAdapter::collect_samples` dispatches on `plan.mode`
+    — `ConstantRateScheduler` for open, `VuPool` for closed.
+- **Postgres SQL load adapter**:
+  - `engine::load::postgres::{PostgresTarget, LoadQuery,
+    QueryParam, PgLoadPlan}` — DSN + parameterized SQL string
+    + ordered typed bind values. No raw interpolation path:
+    values can only enter through `LoadQuery::param`.
+  - `adapters::load::postgres::PostgresLoadAdapter` —
+    deadpool-postgres pool, `prepare` + `query` per tick,
+    binds via `tokio_postgres::types::ToSql`. Same open/closed
+    dispatch as the HTTP adapter; success maps to
+    `status_code: Some(200)`, SQL errors to
+    `status_code: None, error: Some(message)`.
+- **One evaluator, both target types** — new `LoadProfile` trait
+  exposing the four read-only fields the evaluator consumes
+  (`duration / warmup / mode / assertions`). Both `LoadPlan` and
+  `PgLoadPlan` implement it; `evaluate_load<P: LoadProfile>` is
+  one entry point. All four `LoadAssertion` variants
+  (P99Under / ErrorRateBelow / ThroughputAbove / StatusCodeIn)
+  work against postgres samples with no extra code.
+- **Postgres load demo**:
+  `cargo run --example postgres_load_demo --package
+  ematix-probe-core`. Spins a Postgres testcontainer, seeds a
+  small `users` table, drives 10 VUs against
+  `SELECT * FROM users WHERE id = $1::bigint` for 2s, evaluates
+  all four assertions.
+
+### Test surface — Sprint 8
+
+- Rust: 14 new tests across the LoadMode refactor (2),
+  VuPool (5), HTTP-adapter VU mode (1), Postgres target
+  shape (5), Postgres adapter integration (3), and
+  postgres-typed evaluator (5). All prior tests remained
+  green through the `evaluate_load` generic refactor.
+- Python: no new tests this sprint (load API still Rust-only —
+  Python surface is Phase 7).
+
 ### Added — Phase 4b (Sprint 7, PI-1)
 
 - **Two more `LoadAssertion` variants** rounding out the v0.1

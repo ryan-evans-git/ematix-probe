@@ -37,7 +37,7 @@ they introduce the most new infrastructure.
 | **5** | Phase 3 | Data probe S3 + distribution assertions (`percentile_between`, `cardinality_between`, `schema_match`) | planned |
 | **6** | Phase 4a | Load probe HTTP MVP — constant-rate scheduler, OTel ExponentialHistogram, `p99_under` / `error_rate_below` | planned |
 | **7** | Phase 4b | Load probe HTTP polish — `throughput_above` / `status_code_in` / warmup; httpbin-style end-to-end example | planned |
-| **8** | Phase 5 | Load probe VU mode + Postgres SQL adapter; query parameterization | planned |
+| **8** | Phase 5 | Load probe VU mode + Postgres SQL adapter; query parameterization | **closed 2026-05-09** ([retro](sprints/sprint-08.md#retro-filled-at-sprint-close)) |
 | **9** | Phase 6 + Phase 7 | pytest plugin + `ematix-flow` integration shim + opt-in run history persistence | planned |
 | **10** | Phase 8 + Phase 9 | `explain` / `doctor` polish + docs + v0.1 PyPI release | planned |
 
