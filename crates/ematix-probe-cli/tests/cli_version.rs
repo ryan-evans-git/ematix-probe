@@ -15,8 +15,9 @@ fn cli_version_flag_prints_name_and_version() {
     );
 
     let stdout = String::from_utf8(output.stdout).expect("stdout was not utf-8");
+    let expected = format!("ematix-probe {}", env!("CARGO_PKG_VERSION"));
     assert!(
-        stdout.starts_with("ematix-probe 0.1.0-dev"),
-        "unexpected --version output: {stdout:?}"
+        stdout.starts_with(&expected),
+        "unexpected --version output: {stdout:?} (expected prefix {expected:?})"
     );
 }

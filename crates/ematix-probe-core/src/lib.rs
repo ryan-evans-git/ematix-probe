@@ -11,7 +11,7 @@ pub mod engine;
 pub use adapters::data::{AdapterError, DataAdapter};
 pub use engine::data::{Assertion, AssertionResult, ProbePlan, RunSummary, Verdict};
 
-pub const VERSION: &str = "0.1.0-dev";
+pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 pub fn version() -> &'static str {
     VERSION
@@ -22,8 +22,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn version_returns_dev_string() {
-        assert_eq!(version(), "0.1.0-dev");
+    fn version_returns_workspace_version() {
+        // Sourced from Cargo at build time, so it tracks the
+        // [workspace.package] version automatically. The check
+        // here is "non-empty + matches the cargo env" to keep
+        // the assertion stable across version bumps.
+        assert_eq!(version(), env!("CARGO_PKG_VERSION"));
+        assert!(!version().is_empty());
     }
 
     #[test]
