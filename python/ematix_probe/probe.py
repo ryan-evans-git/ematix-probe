@@ -36,6 +36,7 @@ from ematix_probe._core import (
     run_duckdb_probe,
     run_parquet_probe,
     run_postgres_probe,
+    run_s3_parquet_probe,
 )
 
 from .duration import parse_duration
@@ -220,6 +221,14 @@ class DataProbe:
             raw = run_duckdb_probe(self._source.url, self._plan)
         elif kind == "parquet":
             raw = run_parquet_probe(self._source.url, self._plan)
+        elif kind == "s3_parquet":
+            raw = run_s3_parquet_probe(
+                self._source.s3_bucket,
+                self._source.s3_key,
+                self._source.s3_region,
+                self._source.s3_endpoint,
+                self._plan,
+            )
         else:
             # S3 Parquet + future kinds land in later phases; until
             # then, error explicitly rather than silently no-op.

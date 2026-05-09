@@ -115,6 +115,67 @@ implications:
    story to the sprint file before doing the work** (even
    retroactively in the same PR).
 
+## 2026-05-08 — `object_store` over `aws-sdk-s3` for "treat it like a byte source" workloads `architecture` `rust` `tooling`
+
+S-6.1 chose `object_store` (Apache crate, ~10 transitive deps,
+single-trait abstraction) over `aws-sdk-s3` (~30 transitive deps,
+AWS-specific) for the S3 Parquet adapter.
+
+Two wins beyond dep weight:
+
+1. **AmazonS3 + LocalFileSystem implement the same trait.** Tests
+   point a `LocalFileSystem` store at a tempdir holding a
+   parquet file and exercise the *exact* code path the production
+   AmazonS3 store would. No LocalStack needed for adapter-level
+   testing; LocalStack is reserved for end-to-end "looks like real
+   S3" coverage.
+
+2. **Test seam for free.** The constructor split is:
+   - `S3ParquetAdapter::open(bucket, key, region, endpoint_url)` —
+     production; builds AmazonS3 internally.
+   - `S3ParquetAdapter::from_object_store(store, key)` —
+     accepts any `Arc<dyn ObjectStore>`; tests + advanced users
+     who need custom auth.
+
+   Same constructor pattern works for any object-store-backed
+   adapter we add later (GCS, Azure, etc).
+
+Pattern: when adding a "fetch object from somewhere" adapter,
+reach for `object_store` first. Drop down to a vendor-specific
+SDK (aws-sdk-s3, gcp_auth, etc) only when you need
+service-specific features (bucket policies, presigned URLs,
+multipart writes) that `object_store` doesn't expose.
+
+## 2026-05-08 — Inner `pub mod` declarations must come AFTER the module's `//!` doc comment `rust`
+
+S-6.4 first cut had:
+
+```rust
+pub mod scheduler;
+
+//! Engine-side load-probe types: ...
+```
+
+The compiler rejects the inner doc comment because items have
+already appeared in the module. Inner doc comments
+(`//!` / `/*! ... */`) must precede every item in their module.
+
+Fix: put `pub mod` declarations *after* the module-level `//!`
+comment. Module structure:
+
+```rust
+//! ...module docs...
+
+pub mod child;
+
+use whatever;
+
+// ...rest of module...
+```
+
+Trivial but burned a compile cycle; documenting so the next
+"add a submodule to a doc-commented module" attempt remembers.
+
 ## 2026-05-08 — Terminal-at-build Acc variants store raw verdict, not pre-baked `AssertionResult` `architecture` `rust`
 
 In S-5.3 (SchemaMatch) the schema check is fully decided at

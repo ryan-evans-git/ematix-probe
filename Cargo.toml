@@ -48,3 +48,13 @@ parquet = "58"
 # Tempfile (dev-only) — used by Parquet adapter tests to seed files
 # in tmp dirs that auto-clean.
 tempfile = "3"
+# Object storage abstraction — used by the S3 Parquet adapter
+# (S-6.1). The `aws` feature pulls in the AmazonS3 client. The
+# `fs` (LocalFileSystem) impl ships with the default features and
+# is used in tests so we don't need LocalStack to exercise the
+# download path.
+object_store = { version = "0.13", features = ["aws"] }
+# HTTP client for the load probe (S-6.5). Already in our closure
+# transitively via testcontainers/bollard; promoting it to a
+# direct dep with the minimal feature set we need.
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }

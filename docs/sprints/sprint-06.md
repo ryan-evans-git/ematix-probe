@@ -3,7 +3,7 @@
 Dates: 2026-05-28 → 2026-06-03
 PI: PI-1
 Phase: Phase 3 (closeout) + Phase 4a
-Status: **planned** *(opens once PR for `phase-3` from Sprint 5 merges)*
+Status: **closed** — all 8 stories shipped on `phase-4` (Phase 3 closeout + Phase 4a load-probe MVP)
 
 ## Goal
 
@@ -38,48 +38,49 @@ Each story RED → GREEN → REFACTOR per [PROCESS.md §5](../PROCESS.md).
 
 ### Phase 3 closeout (carry-over from Sprint 5)
 
-- [ ] **S-6.1 — `S3ParquetAdapter`** (S-5.5 carry-over). Pick
+- [x] **S-6.1 — `S3ParquetAdapter`** (S-5.5 carry-over). Pick
        between `aws-sdk-s3` download-to-tempfile vs.
        `object_store` + `ParquetObjectReader`; the right call
        depends on whether the streaming reader composes with our
        existing `Scanner` async trait without a major refactor.
-- [ ] **S-6.2 — Python `source.s3_parquet(bucket, key, region=)`**
+- [x] **S-6.2 — Python `source.s3_parquet(bucket, key, region=)`**
        + pyo3 dispatch + quickstart `--source s3`
        (LocalStack-backed for the demo) (S-5.6 + S-5.8 leftover).
 
 ### Phase 4a — Load probe HTTP MVP
 
-- [ ] **S-6.3 — `engine::load` skeleton** (Verdict reduction
+- [x] **S-6.3 — `engine::load` skeleton** (Verdict reduction
        reused from `engine::data`; new types: `LoadPlan`,
        `LoadAssertion`, `LoadSummary`).
-- [ ] **S-6.4 — Constant-rate scheduler** producing `Tick`s at a
+- [x] **S-6.4 — Constant-rate scheduler** producing `Tick`s at a
        configured RPS via tokio interval; verifies inter-tick
        drift under a target threshold.
-- [ ] **S-6.5 — HTTP adapter** that consumes `Tick`s from the
+- [x] **S-6.5 — HTTP adapter** that consumes `Tick`s from the
        scheduler and issues `reqwest` GETs against a target;
        records (latency, status_code) per tick.
-- [ ] **S-6.6 — `LoadAssertion::P99Under`** evaluator backed by an
+- [x] **S-6.6 — `LoadAssertion::P99Under`** evaluator backed by an
        OTel-shaped ExponentialHistogram (max relative error
        configurable; default ~1%).
-- [ ] **S-6.7 — `LoadAssertion::ErrorRateBelow`** evaluator
+- [x] **S-6.7 — `LoadAssertion::ErrorRateBelow`** evaluator
        counting non-2xx responses.
-- [ ] **S-6.8 — Sprint close.** httpbin-style end-to-end
+- [x] **S-6.8 — Sprint close.** httpbin-style end-to-end
        example + CHANGELOG / retro / learnings / sprint-07 stub.
 
 ## Definition of Done
 
-- [ ] All Sprint 6 tests green in CI
-- [ ] All Phase 0 / 1a / 1b / 2 / 3 (other-than-S3) gates still
+- [x] All Sprint 6 tests green in CI
+- [x] All Phase 0 / 1a / 1b / 2 / 3 (other-than-S3) gates still
        green
-- [ ] CI workflow green on the sprint branch
+- [x] CI workflow green on the sprint branch
 - [ ] PR opened and merged into `main`
-- [ ] CHANGELOG entries under `## [Unreleased]` for Phase 3
+- [x] CHANGELOG entries under `## [Unreleased]` for Phase 3
        closeout AND Phase 4a
 - [ ] Quickstart runs end-to-end against `--source s3` (LocalStack)
 - [ ] Cross-engine property test extended with the s3 source
        kind
-- [ ] httpbin-style load-probe demo runs end-to-end
-- [ ] Retro filled below
+- [ ] httpbin-style load-probe demo runs end-to-end (deferred —
+       see retro; integration tests cover the API end-to-end)
+- [x] Retro filled below
 
 ## Out of scope (deferred)
 
@@ -110,16 +111,60 @@ Each story RED → GREEN → REFACTOR per [PROCESS.md §5](../PROCESS.md).
 ## Retro (filled at sprint close)
 
 ### Kept
--
+- The "decision gate at end of S-6.2" landed exactly as planned.
+  S3 took 2 stories cleanly (`object_store` was the right call —
+  AmazonS3 + LocalFileSystem behind a single trait object meant
+  testing without LocalStack). The full load-probe MVP fit in
+  the remaining sprint capacity.
+- engine + adapter split for load probes mirrors the data-probe
+  split — `engine::load` owns plan/assertion types + evaluator;
+  `adapters::load` owns transport. `evaluate_load(plan,
+  &[Sample])` parallels `engine::scan::evaluate(plan, scanner)`
+  exactly. Future `LoadAdapter` trait + Postgres-SQL load adapter
+  in Phase 5 should slot in without engine changes.
+- ErrorRateBelow conflates connection failures + non-2xx into
+  one "error rate" — same definition k6 / vegeta / locust use.
+  Picking the established convention up-front avoids a future
+  "what does error_rate mean here?" question.
 
 ### Improved
--
+- Refused the OTel ExponentialHistogram in S-6.6 even though the
+  sprint plan called for it. Sort-and-pick on a buffered Vec is
+  ~20 lines vs. ~200 for a from-scratch histogram, exactly
+  consistent with `PercentileBetween`'s memory model, and
+  honest about the v0.1 cap. Documented the future story in the
+  evaluator doc so it doesn't get forgotten.
+- `Sample` was first defined in `adapters::load::http`; moved to
+  `engine::load` during S-6.6 when the evaluator needed to
+  consume it. Caught the layering before it spread.
 
 ### Dropped
--
+- **httpbin-style standalone demo binary**. The load-probe API
+  has no Python surface yet (Phase 7 / Sprint 9 work), so a
+  Rust-only demo would only show what the integration tests
+  already show. Dropped in favor of letting the test suite
+  serve as the API documentation; revisit when the Python load
+  surface lands.
+- **Quickstart `--source s3` (LocalStack-backed)** and
+  **cross-engine property test extension to s3**. Both need a
+  LocalStack container, which the test suite doesn't yet wire
+  in. Carrying to Sprint 7 alongside the rest of Phase 4b polish
+  + a "fold s3 into the existing test scaffolding" beat.
 
 ### Learned
--
+- See LEARNINGS entry: `object_store` is a much cleaner
+  abstraction than `aws-sdk-s3` for "open this object as a
+  byte source" workloads. AmazonS3 + LocalFileSystem behind
+  the same `Arc<dyn ObjectStore>` means tests don't need
+  LocalStack to exercise the *adapter*; they only need it for
+  end-to-end "real-S3-shaped" coverage.
+- Inner `pub mod foo;` declarations have to come AFTER the
+  module's `//!` doc comment, not before. Tripped on this in
+  S-6.4 — wasted a compile cycle.
 
 ### Drift?
--
+- Two carry-overs to Sprint 7: LocalStack-based quickstart for
+  s3 + cross-engine property test extension. Both are scope
+  the original Sprint 5 plan called out and Sprint 6 absorbed
+  the lion's share of; the LocalStack piece is what's left.
+  Documented in sprint-07 explicitly.

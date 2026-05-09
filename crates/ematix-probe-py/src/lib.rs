@@ -12,6 +12,7 @@ use ematix_probe_core as core;
 use ematix_probe_core::adapters::data::duckdb::DuckDbAdapter;
 use ematix_probe_core::adapters::data::parquet::ParquetAdapter;
 use ematix_probe_core::adapters::data::postgres::PostgresAdapter;
+use ematix_probe_core::adapters::data::s3_parquet::S3ParquetAdapter;
 use ematix_probe_core::DataAdapter;
 use pyo3::exceptions::PyRuntimeError;
 use pyo3::prelude::*;
@@ -258,6 +259,35 @@ fn duckdb_setup(py: Python<'_>, path: String, sql: String) -> PyResult<()> {
     .map_err(|e| PyRuntimeError::new_err(e.to_string()))
 }
 
+/// Synchronous Python entry point for the S3 Parquet adapter.
+/// Mirrors `source.s3_parquet(bucket=, key=, region=,
+/// endpoint_url=)` on the Python side.
+#[pyfunction]
+#[pyo3(signature = (bucket, key, region, endpoint_url, plan))]
+fn run_s3_parquet_probe(
+    py: Python<'_>,
+    bucket: String,
+    key: String,
+    region: String,
+    endpoint_url: Option<String>,
+    plan: &PyProbePlan,
+) -> PyResult<PyRunReport> {
+    let core_plan = plan.inner.clone();
+    let summary = py.detach(move || -> Result<core::RunSummary, core::AdapterError> {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .map_err(|e| core::AdapterError::Connection(format!("tokio runtime: {e}")))?;
+        runtime.block_on(async move {
+            let adapter = S3ParquetAdapter::open(&bucket, &key, &region, endpoint_url.as_deref())?;
+            adapter.execute(&core_plan).await
+        })
+    });
+    summary
+        .map(|inner| PyRunReport { inner })
+        .map_err(|e| PyRuntimeError::new_err(e.to_string()))
+}
+
 /// Synchronous Python entry point for the local-file Parquet
 /// adapter. `path` is the same value `source.parquet(path)`
 /// carries.
@@ -342,6 +372,7 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(run_postgres_probe, m)?)?;
     m.add_function(wrap_pyfunction!(run_duckdb_probe, m)?)?;
     m.add_function(wrap_pyfunction!(run_parquet_probe, m)?)?;
+    m.add_function(wrap_pyfunction!(run_s3_parquet_probe, m)?)?;
     m.add_function(wrap_pyfunction!(duckdb_setup, m)?)?;
     Ok(())
 }

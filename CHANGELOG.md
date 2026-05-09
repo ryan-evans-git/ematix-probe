@@ -7,6 +7,79 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Added — Phase 3 closeout + Phase 4a (Sprint 6, PI-1)
+
+#### Phase 3 closeout (carry-over from Sprint 5)
+
+- **`S3ParquetAdapter`** (`adapters::data::s3_parquet`) — built
+  on the `object_store` crate so the same trait object backs
+  AWS S3, LocalStack, MinIO, R2, and a `LocalFileSystem` impl
+  for tests.
+  - `S3ParquetAdapter::open(bucket, key, region, endpoint_url)`
+    for production. `endpoint_url` is the LocalStack/MinIO/R2
+    knob.
+  - `S3ParquetAdapter::from_object_store(store, key)` for tests
+    (or for users who want custom object-store auth).
+  - `execute` downloads the object to a tempfile and delegates
+    to the existing `ParquetAdapter`. Trades S3 byte-range
+    streaming for a one-line implementation that reuses the
+    scan-path; streaming via `ParquetObjectReader` is the
+    eventual destination.
+- **Python `source.s3_parquet(bucket, key, region, endpoint_url)`**
+  + pyo3 dispatch. `Source` dataclass extended with optional
+  `s3_bucket` / `s3_key` / `s3_region` / `s3_endpoint` fields
+  (explicit rather than packed into `url` query params).
+  `parquet()` already rejected `s3://` URLs in Phase 2; that
+  pointer is now real.
+
+#### Phase 4a — Load probe HTTP MVP
+
+- **New module `engine::load`**: parallel to `engine::data` for
+  load tests.
+  - `HttpTarget { method, url }` + `HttpTarget::get(url)`. v0.1
+    only `GET`.
+  - `LoadPlan { target, duration, rps, assertions }`.
+  - `LoadAssertion::{ P99Under { metric, threshold_ms } |
+    ErrorRateBelow { threshold } }` — `non_exhaustive`.
+  - `Sample { tick_index, latency, status_code, error }`. Lives
+    in `engine::load` so evaluators can consume it without
+    crossing into `adapters::load`.
+  - `evaluate_load(plan, &[Sample]) -> RunSummary` — same
+    `Verdict` + `reduce_verdict` as `engine::data`, so callers
+    see one consistent verdict-reduction story across data +
+    load probes.
+- **`engine::load::scheduler::ConstantRateScheduler`** — emits
+  `Tick`s at a target RPS for a fixed duration. Tick #i
+  scheduled at `start + i / rps`; lazy start so `new()` doesn't
+  race the wall clock. `fired_at` is recorded so downstream can
+  measure scheduler drift.
+- **`adapters::load::http::HttpLoadAdapter`** — `reqwest` GETs
+  driven by the scheduler; `tokio::spawn` per tick (k6-style
+  open model) so the next tick can fire on schedule even if a
+  prior request is still in flight. Per-request timeout =
+  `plan.duration + 5s`.
+- **P99Under evaluator**: nearest-rank method on a buffered
+  Vec<f64>ms (mirrors `PercentileBetween` for data probes).
+  Filters out connection-error samples; v0.1 only computes
+  `metric == "latency_ms"` (other strings → Error).
+- **ErrorRateBelow evaluator**: counts (connection failure ∪
+  non-2xx status) / total samples; same definition as k6 /
+  vegeta / locust. Threshold out of `[0, 1]` (incl NaN) →
+  Error. Empty samples → Error.
+- **`reqwest`** promoted from a transitive (via
+  testcontainers/bollard) to a direct dep with the minimal
+  `rustls-tls` feature set.
+
+The load probe API is Rust-only in Phase 4a. Python wrapping +
+pytest integration land in Phase 7 (Sprint 9).
+
+### Test surface — Sprint 6
+
+- Rust: 31 new tests across S3 (3) + load skeleton (4) +
+  scheduler (5) + HTTP adapter (3) + P99 evaluator (5) +
+  ErrorRate evaluator (6) + S3 coverage (already in S-6.1 file).
+- Python: 6 new tests for `source.s3_parquet` + dispatch.
+
 ### Added — Phase 3 (Sprint 5, PI-1)
 
 - **Distribution assertions** — three new assertion variants
