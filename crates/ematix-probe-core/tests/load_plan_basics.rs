@@ -15,6 +15,7 @@ fn load_plan_holds_target_duration_rps_and_assertions() {
         target: HttpTarget::get("http://example.com/health"),
         duration: Duration::from_secs(5),
         rps: 10.0,
+        warmup: Duration::ZERO,
         assertions: vec![
             LoadAssertion::P99Under {
                 metric: "latency_ms".into(),
@@ -27,6 +28,7 @@ fn load_plan_holds_target_duration_rps_and_assertions() {
     assert_eq!(plan.target.method, "GET");
     assert_eq!(plan.duration, Duration::from_secs(5));
     assert_eq!(plan.rps, 10.0);
+    assert_eq!(plan.warmup, Duration::ZERO);
     assert_eq!(plan.assertions.len(), 2);
 }
 

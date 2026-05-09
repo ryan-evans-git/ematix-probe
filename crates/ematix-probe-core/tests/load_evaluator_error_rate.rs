@@ -15,6 +15,7 @@ fn plan(assertion: LoadAssertion) -> LoadPlan {
         target: HttpTarget::get("http://x.test"),
         duration: Duration::from_secs(1),
         rps: 1.0,
+        warmup: Duration::ZERO,
         assertions: vec![assertion],
     }
 }

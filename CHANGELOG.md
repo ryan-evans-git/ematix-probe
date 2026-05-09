@@ -7,6 +7,54 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Added — Phase 4b (Sprint 7, PI-1)
+
+- **Two more `LoadAssertion` variants** rounding out the v0.1
+  load-probe vocabulary:
+  - `ThroughputAbove { threshold_rps }` — actual req/s
+    (samples / wall-clock seconds) at or above the threshold.
+    Counts every attempted request including connection
+    failures (the "did the scheduler keep up?" assertion); pair
+    with `ErrorRateBelow` for the success angle.
+  - `StatusCodeIn { allowed: Vec<u16> }` — every sample's
+    `status_code` must be in `allowed`. Connection failures
+    count as violations. Failure message lists the first 5
+    offenders with a "+N more" suffix.
+- **`LoadPlan::warmup: Duration`** + sample-window filtering in
+  `evaluate_load`. Samples with `tick_index <
+  floor(warmup_secs * rps)` are dropped before any per-assertion
+  evaluation. `ThroughputAbove` uses `(duration - warmup)` as
+  its denominator. `warmup >= duration` rejected as Error
+  per assertion.
+- **LocalStack test scaffolding** (`testcontainers-modules`
+  `localstack` feature) + new tests:
+  - `s3_parquet_localstack.rs`: end-to-end S3ParquetAdapter
+    against a LocalStack S3 container. Locks in the production
+    AmazonS3 path (not just `LocalFileSystem`).
+  - `cross_engine_consistency.rs`: extended to compare *4*
+    engines (postgres + duckdb + parquet + s3_parquet) on the
+    same seed bytes.
+- **Quickstart `--source s3`**: spins LocalStack, creates a
+  bucket, has DuckDB write parquet locally, boto3-uploads it,
+  then probes via `source.s3_parquet`. Same Verdict shape as
+  the other backends.
+- **Rust load-probe example**:
+  `cargo run --example load_probe_demo`. Spins an in-process
+  httpbin-shaped responder + drives a 25-RPS / 2s plan
+  exercising all 4 v0.1 load assertions. (Standalone Rust
+  example because the load API doesn't have a Python surface
+  yet — Phase 7 / Sprint 9 work.)
+- **Python dev extras**: `testcontainers[postgres,localstack]`
+  + `boto3>=1.34`. requirements-dev.lock regenerated.
+
+### Test surface — Sprint 7
+
+- Rust: 16 new tests + the cross-engine extension (1 LocalStack
+  + 6 ThroughputAbove + 5 StatusCodeIn + 4 warmup + s3 added
+  to the existing consistency test).
+- Python: no new tests (the s3 quickstart is a demo, not a
+  test); existing 64 still green.
+
 ### Added — Phase 3 closeout + Phase 4a (Sprint 6, PI-1)
 
 #### Phase 3 closeout (carry-over from Sprint 5)

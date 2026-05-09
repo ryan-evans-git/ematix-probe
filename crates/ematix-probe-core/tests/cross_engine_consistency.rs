@@ -21,14 +21,22 @@
 
 use std::fs::File;
 
+use std::sync::Arc;
+
 use ematix_probe_core::adapters::data::duckdb::DuckDbAdapter;
 use ematix_probe_core::adapters::data::parquet::ParquetAdapter;
 use ematix_probe_core::adapters::data::postgres::PostgresAdapter;
+use ematix_probe_core::adapters::data::s3_parquet::S3ParquetAdapter;
 use ematix_probe_core::{Assertion, AssertionResult, DataAdapter, ProbePlan, RunSummary, Verdict};
+use object_store::aws::AmazonS3Builder;
+use object_store::path::Path as ObjectPath;
+use object_store::{ObjectStore, ObjectStoreExt, PutPayload};
 use parquet::arrow::ArrowWriter;
 use tempfile::TempDir;
+use testcontainers_modules::localstack::LocalStack;
 use testcontainers_modules::postgres::Postgres;
 use testcontainers_modules::testcontainers::runners::AsyncRunner;
+use testcontainers_modules::testcontainers::ImageExt;
 use tokio_postgres::NoTls;
 
 /// Postgres flavor of the seed: TIMESTAMPTZ + DOUBLE PRECISION.
@@ -147,7 +155,48 @@ async fn cross_engine_verdicts_agree() {
         .expect("seed parquet");
     let parquet = ParquetAdapter::open(&parquet_path).expect("open parquet");
 
-    // ---- Suite 1: core assertions (postgres + duckdb + parquet must agree) ----
+    // ---- Spin LocalStack S3 + upload the same parquet ----
+    let ls = LocalStack::default()
+        .with_env_var("SERVICES", "s3")
+        .start()
+        .await
+        .expect("localstack container failed to start");
+    let ls_host = ls.get_host().await.unwrap();
+    let ls_port = ls.get_host_port_ipv4(4566).await.unwrap();
+    let ls_endpoint = format!("http://{ls_host}:{ls_port}");
+    const S3_BUCKET: &str = "consistency-test";
+    const S3_KEY: &str = "users.parquet";
+    let s3_store: Arc<dyn ObjectStore> = Arc::new(
+        AmazonS3Builder::new()
+            .with_bucket_name(S3_BUCKET)
+            .with_region("us-east-1")
+            .with_endpoint(&ls_endpoint)
+            .with_allow_http(true)
+            .with_access_key_id("test")
+            .with_secret_access_key("test")
+            .build()
+            .expect("build LocalStack object store"),
+    );
+    // Bucket creation via raw PUT — object_store doesn't expose
+    // a CreateBucket wrapper for AmazonS3.
+    let resp = reqwest::Client::new()
+        .put(format!("{ls_endpoint}/{S3_BUCKET}"))
+        .send()
+        .await
+        .expect("create bucket request");
+    assert!(
+        resp.status().is_success() || resp.status().as_u16() == 409,
+        "unexpected create-bucket status: {}",
+        resp.status()
+    );
+    let parquet_bytes = std::fs::read(&parquet_path).expect("read seed parquet");
+    s3_store
+        .put(&ObjectPath::from(S3_KEY), PutPayload::from(parquet_bytes))
+        .await
+        .expect("put parquet to localstack");
+    let s3 = S3ParquetAdapter::from_object_store(s3_store, S3_KEY);
+
+    // ---- Suite 1: core assertions (all 4 engines must agree) ----
     let core_plan = pp(vec![
         Assertion::NotNull {
             column: "email".into(),
@@ -180,9 +229,11 @@ async fn cross_engine_verdicts_agree() {
     let pg_core = pg_adapter.execute(&core_plan).await.expect("pg core");
     let duck_core = duck.execute(&core_plan).await.expect("duckdb core");
     let parquet_core = parquet.execute(&core_plan).await.expect("parquet core");
+    let s3_core = s3.execute(&core_plan).await.expect("s3 core");
 
     assert_shapes_equal("postgres vs duckdb (core)", &pg_core, &duck_core);
     assert_shapes_equal("duckdb vs parquet (core)", &duck_core, &parquet_core);
+    assert_shapes_equal("parquet vs s3 (core)", &parquet_core, &s3_core);
 
     // Spot-check the expected verdicts so a coincidental mutual
     // miscomputation across adapters can't slip through.
@@ -238,7 +289,9 @@ async fn cross_engine_verdicts_agree() {
     ]);
     let duck_scan = duck.execute(&scan_plan).await.expect("duckdb scan");
     let parquet_scan = parquet.execute(&scan_plan).await.expect("parquet scan");
+    let s3_scan = s3.execute(&scan_plan).await.expect("s3 scan");
     assert_shapes_equal("duckdb vs parquet (scan-only)", &duck_scan, &parquet_scan);
+    assert_shapes_equal("parquet vs s3 (scan-only)", &parquet_scan, &s3_scan);
 
     // Postgres returns Error for all three of these; verify that
     // contract too.

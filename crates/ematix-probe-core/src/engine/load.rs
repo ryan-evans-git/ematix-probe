@@ -47,6 +47,21 @@ pub enum LoadAssertion {
     /// The fraction of non-2xx responses must be below
     /// `threshold` (0.0..=1.0). 0.01 = 1%.
     ErrorRateBelow { threshold: f64 },
+    /// Actual achieved request rate (samples / wall-clock
+    /// seconds) must be at or above `threshold_rps`. Counts
+    /// every attempted request including connection failures —
+    /// this is the "did the scheduler keep up?" assertion.
+    /// Pair with `ErrorRateBelow` if you also want to assert
+    /// the requests succeeded.
+    ThroughputAbove { threshold_rps: f64 },
+    /// Every sample's `status_code` must be in `allowed`.
+    /// Connection failures (no `status_code`) count as
+    /// violations. Empty `allowed` is rejected at evaluation
+    /// (asserts nothing — every sample would violate). Use
+    /// alongside or instead of `ErrorRateBelow` when you want
+    /// strict status-code conformance rather than a tolerated
+    /// failure rate.
+    StatusCodeIn { allowed: Vec<u16> },
 }
 
 /// A complete load-probe execution plan.
@@ -58,6 +73,14 @@ pub struct LoadPlan {
     /// throughput on a slow runner / network may drift below
     /// this; the scheduler in S-6.4 documents acceptable drift.
     pub rps: f64,
+    /// Warmup window. Samples whose `tick_index` falls in
+    /// `[0, floor(warmup_secs * rps))` are dropped before
+    /// evaluation — first-connection DNS / TLS / connection
+    /// setup skews early latencies. `Duration::ZERO` (the
+    /// default) means no warmup. Must be strictly less than
+    /// `duration` or `evaluate_load` returns `Verdict::Error`
+    /// for every assertion.
+    pub warmup: Duration,
     pub assertions: Vec<LoadAssertion>,
 }
 
@@ -79,11 +102,44 @@ pub struct Sample {
 /// Mirrors `engine::scan::evaluate` for data probes — produces
 /// a `RunSummary` with one `AssertionResult` per `LoadAssertion`.
 pub fn evaluate_load(plan: &LoadPlan, samples: &[Sample]) -> RunSummary {
+    // Warmup must leave a non-empty measurable window. Surfaces
+    // as Error per assertion so callers see a clear diagnostic
+    // rather than e.g. a divide-by-zero panic in throughput.
+    if plan.warmup >= plan.duration {
+        let results: Vec<AssertionResult> = plan
+            .assertions
+            .iter()
+            .enumerate()
+            .map(|(i, _)| {
+                acc_error(
+                    i,
+                    format!(
+                        "warmup ({:?}) must be < duration ({:?}) — no measurable window",
+                        plan.warmup, plan.duration
+                    ),
+                )
+            })
+            .collect();
+        return RunSummary {
+            verdict: reduce_verdict(&results),
+            assertions: results,
+        };
+    }
+
+    // Filter out samples in the warmup window. Tick i fires at
+    // i / rps seconds; in warmup iff i / rps < warmup_secs.
+    let warmup_ticks = (plan.warmup.as_secs_f64() * plan.rps).floor() as u64;
+    let measured: Vec<Sample> = samples
+        .iter()
+        .filter(|s| s.tick_index >= warmup_ticks)
+        .cloned()
+        .collect();
+
     let results: Vec<AssertionResult> = plan
         .assertions
         .iter()
         .enumerate()
-        .map(|(i, a)| eval_one(i, a, samples))
+        .map(|(i, a)| eval_one(i, a, plan, &measured))
         .collect();
     RunSummary {
         verdict: reduce_verdict(&results),
@@ -91,7 +147,12 @@ pub fn evaluate_load(plan: &LoadPlan, samples: &[Sample]) -> RunSummary {
     }
 }
 
-fn eval_one(idx: usize, assertion: &LoadAssertion, samples: &[Sample]) -> AssertionResult {
+fn eval_one(
+    idx: usize,
+    assertion: &LoadAssertion,
+    plan: &LoadPlan,
+    samples: &[Sample],
+) -> AssertionResult {
     match assertion {
         LoadAssertion::P99Under {
             metric,
@@ -100,6 +161,14 @@ fn eval_one(idx: usize, assertion: &LoadAssertion, samples: &[Sample]) -> Assert
         LoadAssertion::ErrorRateBelow { threshold } => {
             eval_error_rate_below(idx, *threshold, samples)
         }
+        LoadAssertion::ThroughputAbove { threshold_rps } => {
+            // Effective measurement window = duration - warmup.
+            // (Already validated > 0 by the warmup guard in
+            // evaluate_load before we get here.)
+            let effective = plan.duration.saturating_sub(plan.warmup);
+            eval_throughput_above(idx, *threshold_rps, effective, samples)
+        }
+        LoadAssertion::StatusCodeIn { allowed } => eval_status_code_in(idx, allowed, samples),
     }
 }
 
@@ -186,6 +255,111 @@ fn eval_error_rate_below(idx: usize, threshold: f64, samples: &[Sample]) -> Asse
             verdict: Verdict::Fail,
             message: Some(format!(
                 "error_rate = {rate:.4} ({bad} of {total} samples); expected < {threshold:.4}"
+            )),
+        }
+    }
+}
+
+fn eval_throughput_above(
+    idx: usize,
+    threshold_rps: f64,
+    duration: Duration,
+    samples: &[Sample],
+) -> AssertionResult {
+    if !threshold_rps.is_finite() || threshold_rps < 0.0 {
+        return acc_error(
+            idx,
+            format!("ThroughputAbove: threshold_rps must be >= 0 (got {threshold_rps})"),
+        );
+    }
+    if samples.is_empty() {
+        return acc_error(
+            idx,
+            "ThroughputAbove: no samples to compute rate on".to_string(),
+        );
+    }
+    let secs = duration.as_secs_f64();
+    if secs <= 0.0 {
+        return acc_error(
+            idx,
+            "ThroughputAbove: plan duration is zero (no wall-clock budget)".to_string(),
+        );
+    }
+    let actual_rps = samples.len() as f64 / secs;
+    if actual_rps >= threshold_rps {
+        AssertionResult {
+            assertion_index: idx,
+            verdict: Verdict::Pass,
+            message: None,
+        }
+    } else {
+        AssertionResult {
+            assertion_index: idx,
+            verdict: Verdict::Fail,
+            message: Some(format!(
+                "throughput = {actual_rps:.2} rps ({} samples / {secs:.2}s); \
+                 expected >= {threshold_rps:.2} rps",
+                samples.len()
+            )),
+        }
+    }
+}
+
+fn eval_status_code_in(idx: usize, allowed: &[u16], samples: &[Sample]) -> AssertionResult {
+    if allowed.is_empty() {
+        return acc_error(
+            idx,
+            "StatusCodeIn: allowed set is empty (would violate every sample)".to_string(),
+        );
+    }
+    if samples.is_empty() {
+        return acc_error(idx, "StatusCodeIn: no samples to check".to_string());
+    }
+    // Pre-collect into a HashSet for O(1) membership; allowed
+    // is typically small (1-5 codes) so the constant matters
+    // less than readability.
+    let allowed_set: std::collections::HashSet<u16> = allowed.iter().copied().collect();
+    let mut violations: Vec<String> = Vec::new();
+    for s in samples {
+        match s.status_code {
+            Some(c) if allowed_set.contains(&c) => {}
+            Some(c) => violations.push(format!("tick #{}: status {c}", s.tick_index)),
+            None => violations.push(format!(
+                "tick #{}: connection error ({})",
+                s.tick_index,
+                s.error.as_deref().unwrap_or("unknown")
+            )),
+        }
+    }
+    if violations.is_empty() {
+        AssertionResult {
+            assertion_index: idx,
+            verdict: Verdict::Pass,
+            message: None,
+        }
+    } else {
+        // Truncate the violation list so a 1M-sample run
+        // doesn't produce a 1M-line message.
+        let shown = violations
+            .iter()
+            .take(5)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join(", ");
+        let extra = if violations.len() > 5 {
+            format!(" (+{} more)", violations.len() - 5)
+        } else {
+            String::new()
+        };
+        AssertionResult {
+            assertion_index: idx,
+            verdict: Verdict::Fail,
+            message: Some(format!(
+                "{} sample(s) with status_code outside allowed set {:?}: {}{}",
+                violations.len(),
+                allowed,
+                shown,
+                extra
             )),
         }
     }
