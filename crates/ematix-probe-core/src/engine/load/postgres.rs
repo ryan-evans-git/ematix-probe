@@ -5,6 +5,15 @@
 //! splits the SQL string from its bind values so the S-8.5 adapter
 //! can use prepared statements — there is no API path that
 //! interpolates `QueryParam`s into the SQL.
+//!
+//! `PgLoadPlan` is the SQL analogue of `LoadPlan`: same `mode` /
+//! `duration` / `warmup` / `assertions`, but typed against
+//! `PostgresTarget`. Evaluator unification (sharing one
+//! `evaluate_load` across HTTP and Postgres samples) lands in S-8.6.
+
+use std::time::Duration;
+
+use crate::engine::load::{LoadAssertion, LoadMode};
 
 /// One Postgres bind value. Variants cover the common
 /// `tokio-postgres` `ToSql` types we need for v0.1; richer types
@@ -66,4 +75,16 @@ impl PostgresTarget {
             query,
         }
     }
+}
+
+/// Postgres load-probe execution plan. SQL counterpart to
+/// [`crate::engine::load::LoadPlan`].
+#[derive(Debug, Clone)]
+pub struct PgLoadPlan {
+    pub target: PostgresTarget,
+    pub duration: Duration,
+    pub mode: LoadMode,
+    /// See `LoadPlan::warmup` — same semantics here.
+    pub warmup: Duration,
+    pub assertions: Vec<LoadAssertion>,
 }

@@ -10,12 +10,17 @@
 use std::time::Duration;
 
 use ematix_probe_core::adapters::load::postgres::PostgresLoadAdapter;
-use ematix_probe_core::engine::load::postgres::{LoadQuery, PgLoadPlan, PostgresTarget, QueryParam};
+use ematix_probe_core::engine::load::postgres::{
+    LoadQuery, PgLoadPlan, PostgresTarget, QueryParam,
+};
 use ematix_probe_core::engine::load::LoadMode;
 use testcontainers_modules::postgres::Postgres;
 use testcontainers_modules::testcontainers::runners::AsyncRunner;
 
-async fn dsn() -> (String, testcontainers_modules::testcontainers::ContainerAsync<Postgres>) {
+async fn dsn() -> (
+    String,
+    testcontainers_modules::testcontainers::ContainerAsync<Postgres>,
+) {
     let pg = Postgres::default()
         .start()
         .await
@@ -34,7 +39,9 @@ async fn constant_rate_collects_successful_samples() {
     let plan = PgLoadPlan {
         target: PostgresTarget::new(
             &dsn,
-            LoadQuery::new("SELECT $1::int + 1").param(QueryParam::Int(41)),
+            // QueryParam::Int binds as `int8`; cast `$1` to bigint
+            // so the server-side type matches the bound parameter.
+            LoadQuery::new("SELECT $1::bigint + 1").param(QueryParam::Int(41)),
         ),
         duration: Duration::from_millis(500),
         mode: LoadMode::ConstantRate { rps: 10.0 },
@@ -81,10 +88,7 @@ async fn vu_mode_collects_samples_via_vu_pool() {
 async fn sql_error_lands_as_sample_error() {
     let (dsn, _pg) = dsn().await;
     let plan = PgLoadPlan {
-        target: PostgresTarget::new(
-            &dsn,
-            LoadQuery::new("SELECT * FROM no_such_table_xyz_42"),
-        ),
+        target: PostgresTarget::new(&dsn, LoadQuery::new("SELECT * FROM no_such_table_xyz_42")),
         duration: Duration::from_millis(200),
         mode: LoadMode::ConstantRate { rps: 5.0 },
         warmup: Duration::ZERO,
