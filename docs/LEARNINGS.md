@@ -115,6 +115,53 @@ implications:
    story to the sprint file before doing the work** (even
    retroactively in the same PR).
 
+## 2026-05-09 — AWS S3 SDKs fall through to IMDS when env-var creds aren't visible on the builder thread `rust` `tooling` `tdd`
+
+S-7.4 — first cut of the LocalStack S3 test:
+
+```rust
+std::env::set_var("AWS_ACCESS_KEY_ID", "test");
+std::env::set_var("AWS_SECRET_ACCESS_KEY", "test");
+let store = AmazonS3Builder::new()
+    .with_endpoint(&endpoint)
+    // ... (no .with_access_key_id / .with_secret_access_key)
+    .build()?;
+```
+
+Result: 30-second hang followed by:
+
+```
+RetryError { uri: http://169.254.169.254/latest/api/token,
+             retries: 10, source: Connect("Host is down") }
+```
+
+The AmazonS3 client's credential resolver chain went:
+1. Env vars (visible to *this* thread? maybe — varies by test
+   runtime + reqwest's connection-pool thread)
+2. AWS credentials file (none in CI)
+3. IMDS / EC2 metadata service (`169.254.169.254`) — 30s
+   timeout per attempt × 10 retries
+
+Fix: pass creds explicitly to the builder.
+
+```rust
+let store = AmazonS3Builder::new()
+    .with_endpoint(&endpoint)
+    .with_access_key_id("test")
+    .with_secret_access_key("test")
+    .build()?;
+```
+
+Pattern: when you *know* the creds at builder time and you're
+talking to a non-real-AWS endpoint (LocalStack, MinIO, R2),
+**always pass creds explicitly**. Env-var setup is for production
++ from-env() builders; it's needlessly fragile in tests.
+
+Bonus: the same trap bites `boto3` in the Python quickstart, but
+boto3's `client(..., aws_access_key_id=, aws_secret_access_key=)`
+named args sidestep the SDK chain entirely. Use those over
+env vars in test/demo code too.
+
 ## 2026-05-08 — `object_store` over `aws-sdk-s3` for "treat it like a byte source" workloads `architecture` `rust` `tooling`
 
 S-6.1 chose `object_store` (Apache crate, ~10 transitive deps,
