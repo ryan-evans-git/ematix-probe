@@ -24,13 +24,7 @@ pytest-cov is up), coverage tracks the package normally.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
 import pytest
-
-if TYPE_CHECKING:
-    from ematix_probe.probe import DataProbe
-    from ematix_probe.report import RunReport
 
 
 def pytest_pycollect_makeitem(collector, name, obj):
