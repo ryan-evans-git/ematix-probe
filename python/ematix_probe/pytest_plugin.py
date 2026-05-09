@@ -12,14 +12,25 @@ which yields one `DataProbeAssertionItem` per assertion in the
 probe's plan. The collector caches the `RunReport` so the
 underlying `probe.run()` is invoked exactly once even when a probe
 has N assertions — fan-out must not multiply DB / HTTP work.
+
+Imports of `ematix_probe.probe` / `.report` are deliberately
+lazy. Pytest loads pytest11 plugins at startup, *before*
+pytest-cov begins instrumentation; an eager import here would
+pull `ematix_probe` into memory pre-measurement and leave the
+package marked as `module-not-measured` for the whole run. By
+deferring the imports to inside the hook (which only fires after
+pytest-cov is up), coverage tracks the package normally.
 """
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import pytest
 
-from ematix_probe.probe import DataProbe
-from ematix_probe.report import RunReport
+if TYPE_CHECKING:
+    from ematix_probe.probe import DataProbe
+    from ematix_probe.report import RunReport
 
 
 def pytest_pycollect_makeitem(collector, name, obj):
@@ -27,6 +38,8 @@ def pytest_pycollect_makeitem(collector, name, obj):
     for any module-level `DataProbe`, which then yields per-assertion
     items. Returning `None` lets pytest's default collection
     proceed for everything else."""
+    from ematix_probe.probe import DataProbe
+
     if isinstance(obj, DataProbe):
         return DataProbeCollector.from_parent(collector, name=name, probe=obj)
     return None
@@ -38,10 +51,10 @@ class DataProbeCollector(pytest.Collector):
     `RunReport` (or any exception raised by `.run()`) so each
     assertion item reads from a single execution."""
 
-    def __init__(self, *, probe: DataProbe, **kwargs) -> None:
+    def __init__(self, *, probe, **kwargs) -> None:  # type: ignore[no-untyped-def]
         super().__init__(**kwargs)
         self._probe = probe
-        self._cached: tuple[str, RunReport | BaseException] | None = None
+        self._cached: tuple[str, object] | None = None
 
     def collect(self):
         for idx, name in enumerate(self._probe.assertion_names()):
@@ -51,7 +64,7 @@ class DataProbeCollector(pytest.Collector):
                 index=idx,
             )
 
-    def run_probe(self) -> RunReport:
+    def run_probe(self):
         """Run the probe at most once and memoize the outcome. If
         `.run()` raised, the same exception is re-raised on every
         call so each assertion item gets a consistent error rather
@@ -66,9 +79,7 @@ class DataProbeCollector(pytest.Collector):
                 self._cached = ("ok", report)
         kind, payload = self._cached
         if kind == "err":
-            assert isinstance(payload, BaseException)
-            raise payload
-        assert isinstance(payload, RunReport)
+            raise payload  # type: ignore[misc]
         return payload
 
 
