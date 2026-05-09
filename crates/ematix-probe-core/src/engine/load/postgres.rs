@@ -13,7 +13,7 @@
 
 use std::time::Duration;
 
-use crate::engine::load::{LoadAssertion, LoadMode};
+use crate::engine::load::{LoadAssertion, LoadMode, LoadProfile};
 
 /// One Postgres bind value. Variants cover the common
 /// `tokio-postgres` `ToSql` types we need for v0.1; richer types
@@ -87,4 +87,19 @@ pub struct PgLoadPlan {
     /// See `LoadPlan::warmup` — same semantics here.
     pub warmup: Duration,
     pub assertions: Vec<LoadAssertion>,
+}
+
+impl LoadProfile for PgLoadPlan {
+    fn duration(&self) -> Duration {
+        self.duration
+    }
+    fn warmup(&self) -> Duration {
+        self.warmup
+    }
+    fn mode(&self) -> LoadMode {
+        self.mode
+    }
+    fn assertions(&self) -> &[LoadAssertion] {
+        &self.assertions
+    }
 }

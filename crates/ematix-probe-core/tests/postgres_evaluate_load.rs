@@ -88,9 +88,7 @@ fn evaluate_load_pg_plan_status_code_in() {
     // PostgresLoadAdapter maps success → Some(200). StatusCodeIn
     // with allowed=[200] should pass on a clean run and fail when
     // any sample carries an error (None status_code).
-    let plan = pg_plan(vec![LoadAssertion::StatusCodeIn {
-        allowed: vec![200],
-    }]);
+    let plan = pg_plan(vec![LoadAssertion::StatusCodeIn { allowed: vec![200] }]);
     let pass_samples: Vec<Sample> = (0..10).map(|i| ok_sample(i, 5)).collect();
     assert_eq!(evaluate_load(&plan, &pass_samples).verdict, Verdict::Pass);
 
