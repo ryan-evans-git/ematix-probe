@@ -7,7 +7,35 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
-(no changes since v0.1.0)
+(no changes since v0.1.1)
+
+## [0.1.1] - 2026-05-09
+
+### Fixed
+
+- **Sdist now ships LICENSE + NOTICE.** v0.1.0's wheel uploads
+  succeeded but the sdist was rejected by PyPI's metadata
+  validator with `400 License-File LICENSE does not exist in
+  distribution file`. Switched the `[project]` license
+  declaration from the deprecated
+  `license = { text = "Apache-2.0" }` form to PEP 639's
+  `license = "Apache-2.0"` SPDX expression + explicit
+  `license-files = ["LICENSE", "NOTICE"]` glob list. Maturin
+  now packs both files into the sdist root and records the
+  `License-File:` headers PyPI validates against.
+
+### Changed
+
+- Dropped the legacy `License :: OSI Approved :: Apache Software
+  License` trove classifier — PEP 639 deprecates pairing it with
+  the SPDX `license` field; the SPDX expression is canonical.
+
+### Notes
+
+v0.1.0 wheels published successfully and remain available on PyPI;
+v0.1.1 is identical functionally and adds the sdist for users on
+unsupported platforms (Windows / Intel Mac) who fall through the
+wheel matrix.
 
 ## [0.1.0] - 2026-05-09
 

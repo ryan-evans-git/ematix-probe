@@ -4,11 +4,22 @@ build-backend = "maturin"
 
 [project]
 name = "ematix-probe"
-version = "0.1.0"
+version = "0.1.1"
 description = "Declarative testing automation: data probes + load probes, on a Rust core. Assert on the shape of data in Postgres / DuckDB / Parquet (local + S3) and on the behavior of HTTP and SQL services under synthetic load — using one declarative API and one CLI."
 readme = "README.md"
 requires-python = ">=3.10"
-license = { text = "Apache-2.0" }
+# PEP 639: SPDX expression + explicit `license-files` glob list.
+# The deprecated `{ text = "Apache-2.0" }` form told build
+# backends the license name but did NOT package the LICENSE /
+# NOTICE files into the sdist; PyPI's metadata validator then
+# rejected the v0.1.0 sdist with
+#   400 License-File LICENSE does not exist in distribution file
+# (wheels published fine — they got the metadata via a different
+# code path). The PEP 639 form below tells maturin to include
+# both files at the sdist root, satisfying PyPI on the next
+# upload.
+license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE"]
 authors = [
     { name = "Ryan Evans", email = "ryanevans23@gmail.com" },
 ]
@@ -24,9 +35,12 @@ keywords = [
     "parquet",
 ]
 classifiers = [
+    # Per PEP 639: when the SPDX `license` field is set on
+    # [project], the legacy `License :: ...` trove classifier
+    # is deprecated. Modern PyPI uploads warn (or reject) on
+    # both being set — the SPDX field is canonical.
     "Development Status :: 2 - Pre-Alpha",
     "Intended Audience :: Developers",
-    "License :: OSI Approved :: Apache Software License",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
