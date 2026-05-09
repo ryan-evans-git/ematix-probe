@@ -42,6 +42,12 @@ classifiers = [
 Repository = "https://github.com/ryan-evans-git/ematix-probe"
 Issues = "https://github.com/ryan-evans-git/ematix-probe/issues"
 
+[project.entry-points."pytest11"]
+# Auto-load the ematix-probe pytest plugin when the package is
+# installed, so `@probe.data` instances become pytest items
+# without users wiring `pytest_plugins` themselves.
+ematix_probe = "ematix_probe.pytest_plugin"
+
 [project.optional-dependencies]
 dev = [
     "pytest>=8.0",

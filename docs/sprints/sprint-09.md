@@ -1,9 +1,9 @@
 # Sprint 9 — Phase 6 + Phase 7: pytest plugin + ematix-flow shim + run history
 
-Dates: TBD (opens once PR for `phase-6` from Sprint 8 merges)
+Dates: 2026-05-09 → 2026-05-15
 PI: PI-1
 Phase: Phase 6 + Phase 7
-Status: **planned**
+Status: **active** *(opened 2026-05-09 after PR #10 merged)*
 
 ## Goal
 
