@@ -20,7 +20,6 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
-
 from ematix_probe import probe, source
 from ematix_probe.probe import DataProbe
 from ematix_probe.pytest_plugin import (
