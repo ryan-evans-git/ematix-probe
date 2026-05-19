@@ -38,7 +38,7 @@ docker==7.1.0
     # via testcontainers
 filelock==3.29.0
     # via cachecontrol
-idna==3.13
+idna==3.15
     # via requests
 iniconfig==2.3.0
     # via pytest
