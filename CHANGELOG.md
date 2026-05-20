@@ -7,7 +7,67 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
-(no changes since v0.1.1)
+(no changes since v0.1.2)
+
+## [0.1.2] - 2026-05-19
+
+### Changed
+
+- **README rewrite — marketable top.** Mirrors ematix-flow's
+  marketable-README pattern: punchy tagline, code-snippet hook
+  above the fold, "Why ematix-probe" bullets, refreshed status
+  callout. Section content below (Sources, Data probes,
+  Assertions, Load probes, pytest, ematix-flow, Run history,
+  CLI, Python API, What's shipped, Development, License) is
+  unchanged. The pre-rewrite README was the stub from S-10.6
+  with a stale "Phase 7 closed / v0.1 lands in Sprint 10"
+  status block.
+- **`pyproject.toml` description tightened.** Shrunk from a
+  330-char paragraph to a flow-style one-liner:
+  *"Declarative data-quality + load probes for Python. Rust +
+  tokio under the hood."* The longer form read more like an
+  intro than a tagline on PyPI search results.
+- **CI infrastructure mirrored to ematix-flow** (#17 + #18). mold
+  linker (~5-10× faster Rust link phase), cargo-nextest under
+  `cargo llvm-cov nextest` (parallel test execution, 88%
+  region-coverage gate preserved), uv-based Python dep installs
+  via `astral-sh/setup-uv@v4` (warm-cache hits make Python jobs
+  drop from ~14 min to ~1 min). All three CI gates compound on
+  re-runs.
+- **Makefile expanded** with `test` / `test-rust` / `test-python` /
+  `fmt` / `lint` / `security` targets so contributors can
+  reproduce the CI gates locally (#17).
+- **GitHub repo description + topics aligned** with the PyPI
+  tagline; topics added for discoverability (`rust`, `python`,
+  `pytest`, `postgres`, `duckdb`, `parquet`, `s3`,
+  `data-quality`, `data-testing`, `load-testing`, `ematix`).
+
+### Fixed
+
+- **Release runbook drift** (#20). `docs/RELEASE.md` had three
+  stale references: the Python matrix listed `{3.11, 3.12, 3.13}`
+  (real matrix has been `3.11–3.14` since #15), the wheel count
+  was "6 wheels per release" (now 8), and the pre-flight
+  checklist still pointed at raw `cargo test` / `pytest` instead
+  of the new `make test-rust` / `make test-python` targets. All
+  three refreshed.
+- **Stale coverage-rationale comments** (#19). After #17 swapped
+  the test runner to `cargo llvm-cov nextest`, three comments in
+  `ci.yml` still named `cargo test`. Refreshed to runner-agnostic
+  "Rust test suite" phrasing.
+
+### Security
+
+- **idna 3.13 → 3.15** (CVE-2026-45409) in
+  `requirements-dev.lock`. Dev-only transitive (requests →
+  cachecontrol); no impact on shipped wheels.
+
+### Notes
+
+This is a README + metadata release. No public-API or runtime
+behavior changes vs v0.1.1 — users installing from PyPI get
+identical probe + CLI surfaces, just a clearer project page and
+faster CI for contributors.
 
 ## [0.1.1] - 2026-05-09
 

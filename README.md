@@ -1,26 +1,46 @@
 # ematix-probe
 
-**A declarative Python framework for asserting on the shape of
-your data and the behavior of your services. Rust + tokio under
-the hood.**
+**Declarative data-quality + load probes for Python. Rust + tokio under the hood.**
 
-> Status: **Phase 7 closed** (Sprint 9, PI-1) — v0.1 PyPI release
-> lands in Sprint 10. All four surfaces below — data probes, load
-> probes, pytest plugin, ematix-flow integration — are shipped.
+Assert on the shape of your data and the behavior of your services with
+one decorator. Postgres, DuckDB, Parquet (local + S3), HTTP — same
+primitives, one runner.
 
-ematix-probe lets you declare a target (a database table, a
-parquet file, an HTTP endpoint, a SQL query) and the assertions
-it must satisfy in Python; the framework runs the checks and
-returns a structured verdict. Probes carry their own decorators
-and fire from `ematix-probe run`, your pytest suite, or directly
-from Python. The same primitives power data-quality checks
-(Postgres, DuckDB, Parquet — local or S3), load tests (HTTP and
-SQL with constant-rate or virtual-user schedulers), and an
-opt-in run-history sqlite log so trends are queryable across
-runs.
+```python
+from ematix_probe import probe, source
 
-The rest of this README walks through how to use it, in the
-order you'd reach for each feature.
+@probe.data(
+    source=source.postgres("postgres://user:pass@host/db"),
+    table="events",
+    schema="analytics",
+)
+def events_are_healthy(t):
+    t.row_count(at_least=1_000, at_most=1_000_000)
+    t.column("event_id").not_null().unique()
+    t.column("received_at").not_null()
+```
+
+```sh
+pip install ematix-probe
+ematix-probe run probes.py
+```
+
+## Why ematix-probe
+
+- **Same primitives, every backend.** Postgres, DuckDB, Parquet (local
+  + S3), HTTP. Cross-engine consistency tests cover the SQL-pushdown vs.
+  Arrow-scan paths.
+- **Three runners, one decorator.** `ematix-probe run`, your pytest
+  suite, or directly from Python — same probe code, same verdicts.
+- **ematix-flow integration.** Probe a target table from inside a flow
+  pipeline via `probe_from_table()` — the verdict joins the pipeline's
+  run-history row.
+- **Run history, opt-in.** Append every verdict to a sqlite file and
+  query trends across runs with `--run-history-db`.
+
+> Status: **v0.1.2 on PyPI** as `ematix-probe`. PI-1 closed — data
+> probes, load probes, pytest plugin, and ematix-flow integration are
+> shipped and stable.
 
 ---
 
