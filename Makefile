@@ -1,7 +1,50 @@
-.PHONY: lock lock-check help
+# ematix-probe — developer Makefile
+#
+# Wraps the commands CI runs so you can reproduce the same gates
+# locally with `make test`, `make lint`, etc. Targets are safe to run
+# repeatedly; the Rust integration tests use testcontainers and
+# require a running Docker daemon.
+
+.PHONY: help lock lock-check test test-rust test-python fmt lint security
 
 # Bash for `<()` process substitution in lock-check.
 SHELL := /bin/bash
+
+# Use the venv's interpreter when one exists; otherwise fall back to
+# system python3. Override with `make PYTHON=/path/to/python <target>`.
+PYTHON ?= $(shell test -x .venv/bin/python && echo .venv/bin/python || echo python3)
+
+help:  ## Show this help.
+	@awk 'BEGIN {FS=":.*##"; printf "Targets:\n"} \
+	     /^[a-zA-Z0-9_-]+:.*##/ {printf "  %-14s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
+
+# ---- test lanes --------------------------------------------------
+
+test: test-rust test-python  ## Run the full Rust + Python test suites.
+
+test-rust:  ## Rust workspace tests (includes testcontainers — needs Docker).
+	cargo test --workspace --all-targets
+
+test-python:  ## Python test suite via coverage (mirrors CI invocation).
+	coverage run -m pytest
+	coverage report --show-missing
+
+# ---- code-quality gates ------------------------------------------
+
+fmt:  ## cargo fmt + check.
+	cargo fmt --all
+	cargo fmt --all -- --check
+
+lint:  ## ruff (Python) + clippy (Rust, the strict CI gate).
+	ruff check python tests
+	cargo clippy --workspace --all-targets -- -D warnings
+
+security:  ## bandit (Python) + pip-audit + cargo-audit (Rust).
+	bandit -r python -ll -c pyproject.toml
+	pip-audit --skip-editable
+	cargo audit
+
+# ---- lockfile management -----------------------------------------
 
 # `make lock` regenerates `requirements-dev.lock` from
 # `pyproject.toml`'s [project.optional-dependencies].dev. Run this
@@ -11,7 +54,7 @@ SHELL := /bin/bash
 #
 # Uses an isolated venv at `.venv-lock` so pip-tools does not
 # pollute `.venv` (the dev environment used by `maturin develop`).
-lock:
+lock:  ## Regenerate requirements-dev.lock from pyproject.toml.
 	@python3 -m venv .venv-lock
 	@.venv-lock/bin/pip install --quiet --upgrade pip pip-tools
 	@.venv-lock/bin/pip-compile pyproject.toml --extra dev \
@@ -23,7 +66,7 @@ lock:
 # with `pyproject.toml`. Useful as a pre-push sanity check; not
 # wired into CI yet — add a workflow step if drift becomes a
 # recurring issue.
-lock-check:
+lock-check:  ## Verify requirements-dev.lock matches pyproject.toml.
 	@python3 -m venv .venv-lock-check
 	@.venv-lock-check/bin/pip install --quiet --upgrade pip pip-tools
 	@.venv-lock-check/bin/pip-compile pyproject.toml --extra dev \
@@ -37,8 +80,3 @@ lock-check:
 		&& echo "lockfile is up to date" \
 		|| (echo "lockfile is stale — run 'make lock'"; rm -rf .venv-lock-check; exit 1)
 	@rm -rf .venv-lock-check
-
-help:
-	@echo "Targets:"
-	@echo "  lock        Regenerate requirements-dev.lock from pyproject.toml"
-	@echo "  lock-check  Verify requirements-dev.lock matches pyproject.toml"
