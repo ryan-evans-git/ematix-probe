@@ -4,8 +4,8 @@ build-backend = "maturin"
 
 [project]
 name = "ematix-probe"
-version = "0.1.1"
-description = "Declarative testing automation: data probes + load probes, on a Rust core. Assert on the shape of data in Postgres / DuckDB / Parquet (local + S3) and on the behavior of HTTP and SQL services under synthetic load — using one declarative API and one CLI."
+version = "0.1.2"
+description = "Declarative data-quality + load probes for Python. Rust + tokio under the hood."
 readme = "README.md"
 requires-python = ">=3.10"
 # PEP 639: SPDX expression + explicit `license-files` glob list.
