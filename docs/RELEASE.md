@@ -25,10 +25,11 @@ this doc is the manual runbook around it.
 
 ### 1. Pre-flight on `main`
 
-- [ ] `cargo test --workspace` green locally.
-- [ ] `pytest` green locally.
-- [ ] `coverage run -m pytest && coverage report --fail-under=90`
-      passes.
+- [ ] `make test-rust` green locally (workspace tests; needs Docker
+      for the testcontainers-backed integration tests).
+- [ ] `make test-python` green locally (coverage-instrumented
+      pytest run; the `coverage report --fail-under=90` gate is
+      part of the target).
 - [ ] CI green on the latest `main` SHA (the release workflow
       gates on this).
 - [ ] CHANGELOG `## [Unreleased]` block describes everything in
@@ -68,10 +69,10 @@ next cycle.
 
 Before tagging, fire a manual `workflow_dispatch` run of
 `release.yml` from the Actions tab. This builds every wheel in
-the matrix (Linux × {3.11, 3.12, 3.13} + macOS aarch64 × same +
-sdist) but skips the `publish` job because the trigger is not a
-tag push. Inspect the run-summary artifacts to confirm the
-wheels look right.
+the matrix (Linux × {3.11, 3.12, 3.13, 3.14} + macOS aarch64 ×
+same + sdist) but skips the `publish` job because the trigger
+is not a tag push. Inspect the run-summary artifacts to confirm
+the wheels look right.
 
 Two things to watch:
 - Wheel filenames carry the new version (`ematix_probe-X.Y.Z-...whl`).
@@ -94,7 +95,7 @@ The tag push triggers `release.yml`, which:
 1. **Waits for `ci.yml`** on the same SHA (30-min cap). Tag and
    main pushes go through together — `ci.yml` is in flight by
    the time the wait loop polls.
-2. **Builds wheels** for Linux × {3.11, 3.12, 3.13} +
+2. **Builds wheels** for Linux × {3.11, 3.12, 3.13, 3.14} +
    macOS aarch64 × same.
 3. **Builds the sdist** once on Linux.
 4. **Publishes to PyPI** via trusted publishing (no API token
@@ -130,8 +131,8 @@ hand.
 
 Documented inline at the top of `release.yml`. Summary:
 
-- **6 wheels per release**: linux-x86_64 × {3.11, 3.12, 3.13}
-  and macos-aarch64 × {3.11, 3.12, 3.13}.
+- **8 wheels per release**: linux-x86_64 × {3.11, 3.12, 3.13,
+  3.14} and macos-aarch64 × {3.11, 3.12, 3.13, 3.14}.
 - **Linux**: `manylinux_2_28` container — wheels run on every
   glibc-2.28+ system.
 - **macOS**: aarch64 (Apple Silicon) only. Apple Silicon covers
