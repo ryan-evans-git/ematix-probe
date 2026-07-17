@@ -54,7 +54,7 @@ maturin==1.13.1
     # via ematix-probe (pyproject.toml)
 mdurl==0.1.2
     # via markdown-it-py
-msgpack==1.1.2
+msgpack==1.2.1
     # via cachecontrol
 packageurl-python==0.17.6
     # via cyclonedx-python-lib
