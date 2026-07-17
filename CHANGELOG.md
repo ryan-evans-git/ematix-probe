@@ -7,7 +7,34 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
-(no changes since v0.1.2)
+(no changes since v0.1.3)
+
+## [0.1.3] - 2026-07-17
+
+### Added
+
+- **Composite (multi-column) uniqueness — `Assertion::UniqueGroup`.**
+  A new first-class assertion for keys that are unique *jointly*
+  rather than per-column. Table-level Python API `t.unique([...])`;
+  pushdown SQL on Postgres (`GROUP BY … HAVING count(*) > 1`) and a
+  cross-batch `UniqueComposite` accumulator on the scan path
+  (DuckDB / Parquet / S3), keyed on Int64/Utf8 tuple parts.
+- **Correct composite-key handling in the ematix-flow shim.**
+  `probe_from_table` now emits a single joint `unique` over a
+  multi-column primary key (previously a per-column `unique` for
+  each PK column, which hard-fails a valid composite key), and a
+  composite `unique` per declared `__unique_constraints__` group
+  (previously never checked).
+
+### Changed
+
+- **Dependency security bumps** clearing every non-ignored
+  `cargo audit` / `pip-audit` advisory: pyo3 0.28 → 0.29
+  (RUSTSEC-2026-0176/0177), object_store 0.13 → 0.14 (pulls
+  quick-xml 0.41 — RUSTSEC-2026-0194/0195), postgres-protocol
+  0.6.12, tokio-postgres 0.7.18, quinn-proto 0.11.16, anyhow
+  1.0.103, and msgpack 1.2.1 (GHSA-6v7p-g79w-8964). No source
+  changes were required.
 
 ## [0.1.2] - 2026-05-19
 
