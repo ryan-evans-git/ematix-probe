@@ -33,6 +33,16 @@ pub enum Assertion {
     /// don't violate uniqueness — pair with `NotNull` to forbid
     /// them.)
     Unique { column: String },
+    /// The tuple `(columns...)` must be *jointly* unique — no two
+    /// rows share the same combination of values. This is the
+    /// correct check for a composite primary / natural key: the
+    /// individual columns may repeat, only the combination must not.
+    /// A row where any key column is NULL is treated as distinct
+    /// (same GROUP BY / HashSet semantics as single-column `Unique`),
+    /// so pair with `NotNull` on the key columns to forbid NULLs.
+    /// `columns` must be non-empty; a single-element group behaves
+    /// exactly like `Unique`.
+    UniqueGroup { columns: Vec<String> },
     /// All non-NULL values in `column` must lie within the
     /// inclusive range `[low, high]`. NULL values are *not*
     /// counted as violations (SQL `NULL < x` is unknown); pair

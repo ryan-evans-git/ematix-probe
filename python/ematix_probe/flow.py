@@ -52,7 +52,14 @@ def probe_from_table(
 
     Auto-derived assertions:
     - `not_null` on every column where `nullable is False`.
-    - `unique` on every column where `primary_key is True`.
+    - a single `unique` covering the primary key: one column when the
+      PK is single-column, or one *composite* `unique` over the whole
+      tuple when the PK spans several columns. (Emitting a per-column
+      `unique` for each PK column — the previous behaviour — hard-fails
+      a valid composite key, since its columns are only unique
+      *jointly*, e.g. `order_id` repeats across order lines.)
+    - a composite `unique` for every group in `__unique_constraints__`
+      (declared natural keys), if the table exposes it.
 
     `extend` lets callers layer additional assertions on top using
     the same fluent `Tester` API the auto-derived block populates.
@@ -62,12 +69,28 @@ def probe_from_table(
     schema_name = getattr(table_cls, "__schema__", None)
     columns = tuple(table_cls.columns)
 
+    # Collect the key groups. All primary-key columns form ONE key (a
+    # multi-column PK is jointly unique, not per-column); each declared
+    # __unique_constraints__ group is another. De-dup while preserving
+    # order so the same group isn't asserted twice.
+    groups: list[tuple[str, ...]] = []
+    pk = tuple(col.name for col in columns if col.primary_key)
+    if pk:
+        groups.append(pk)
+    for uc in getattr(table_cls, "__unique_constraints__", ()) or ():
+        g = tuple(uc)
+        if g and g not in groups:
+            groups.append(g)
+
     def _build(t: Tester) -> None:
         for col in columns:
             if not col.nullable:
                 t.column(col.name).not_null()
-            if col.primary_key:
-                t.column(col.name).unique()
+        for group in groups:
+            if len(group) == 1:
+                t.column(group[0]).unique()
+            else:
+                t.unique(list(group))
         if extend is not None:
             extend(t)
 

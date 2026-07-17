@@ -71,6 +71,72 @@ def test_duckdb_probe_fails_when_data_is_dirty(tmp_path: Path) -> None:
     assert all(a.verdict == "fail" for a in report.assertions)
 
 
+def test_duckdb_composite_unique_passes_on_valid_composite_key(tmp_path: Path) -> None:
+    # order_id repeats across lines and line_no repeats across orders —
+    # each column is NON-unique — but the (order_id, line_no) tuple is
+    # unique. A per-column unique would wrongly fail; the composite must
+    # pass.
+    db = str(tmp_path / "ok.duckdb")
+    _seed_duckdb(
+        db,
+        """
+        CREATE TABLE order_lines (order_id BIGINT, line_no BIGINT, qty BIGINT);
+        INSERT INTO order_lines VALUES
+            (1, 1, 5), (1, 2, 3),
+            (2, 1, 9), (2, 2, 1);
+        """,
+    )
+
+    @probe.data(source=source.duckdb(db), table="order_lines")
+    def quality(t):
+        t.unique(["order_id", "line_no"])
+
+    report = quality.run()
+    assert report.verdict == "pass", f"unexpected: {report!r}"
+    assert len(report.assertions) == 1
+
+
+def test_duckdb_composite_unique_fails_on_duplicate_combination(tmp_path: Path) -> None:
+    db = str(tmp_path / "dup.duckdb")
+    _seed_duckdb(
+        db,
+        """
+        CREATE TABLE order_lines (order_id BIGINT, line_no BIGINT, qty BIGINT);
+        INSERT INTO order_lines VALUES
+            (1, 1, 5), (1, 2, 3),
+            (1, 1, 7);   -- (1,1) duplicated
+        """,
+    )
+
+    @probe.data(source=source.duckdb(db), table="order_lines")
+    def quality(t):
+        t.unique(["order_id", "line_no"])
+
+    report = quality.run()
+    assert report.verdict == "fail"
+    assert report.assertions[0].verdict == "fail"
+
+
+def test_duckdb_composite_unique_mixed_types(tmp_path: Path) -> None:
+    # Composite key over an Int64 + a Utf8 column.
+    db = str(tmp_path / "mixed.duckdb")
+    _seed_duckdb(
+        db,
+        """
+        CREATE TABLE memberships (tenant_id BIGINT, email VARCHAR);
+        INSERT INTO memberships VALUES
+            (1, 'a@x.com'), (1, 'b@x.com'), (2, 'a@x.com');
+        """,
+    )
+
+    @probe.data(source=source.duckdb(db), table="memberships")
+    def quality(t):
+        t.unique(["tenant_id", "email"])
+
+    report = quality.run()
+    assert report.verdict == "pass", f"unexpected: {report!r}"
+
+
 def test_parquet_probe_runs_against_seeded_file(tmp_path: Path) -> None:
     # Seed a parquet file by having DuckDB write it via COPY TO.
     db = str(tmp_path / "seed.duckdb")
