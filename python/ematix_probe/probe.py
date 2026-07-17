@@ -33,6 +33,7 @@ from ematix_probe._core import (
     assertion_regex,
     assertion_row_count,
     assertion_unique,
+    assertion_unique_group,
     run_duckdb_probe,
     run_parquet_probe,
     run_postgres_probe,
@@ -60,6 +61,8 @@ class _AssertionSpec:
     allowed: tuple[str, ...] | None = None
     row_low: int | None = None
     row_high: int | None = None
+    # Columns for a composite (multi-column) check like unique_group.
+    columns: tuple[str, ...] | None = None
 
 
 class _ColumnRef:
@@ -148,6 +151,21 @@ class Tester:
                 row_high=at_most,
             )
         )
+        return self
+
+    def unique(self, columns: list[str]) -> Tester:
+        """Assert that the tuple of `columns` is *jointly* unique — the
+        correct check for a composite primary / natural key. The
+        individual columns may repeat; only the combination must not.
+
+        A single-element list is accepted and behaves like
+        ``t.column(name).unique()``. NULL key values participate in the
+        combination (matching the Postgres ``GROUP BY`` semantics), so
+        pair with ``not_null`` on the key columns to forbid them."""
+        cols = tuple(columns)
+        if not cols:
+            raise ValueError("unique() requires at least one column")
+        self._add(_AssertionSpec(kind="unique_group", columns=cols))
         return self
 
     def freshness(self, column: str, *, within: str) -> Tester:
@@ -281,6 +299,9 @@ def _assertion_name(spec: _AssertionSpec) -> str:
     """Human label for the report. Column-level checks read as
     ``"<column>.<kind>"``; table-level reads as ``"<kind>(<column>)"``
     or just ``"<kind>"`` when there's no associated column."""
+    if spec.kind == "unique_group":
+        cols = ", ".join(spec.columns or ())
+        return f"unique_group({cols})"
     if spec.kind in ("not_null", "unique", "between", "regex", "enum"):
         return f"{spec.column}.{spec.kind}"
     if spec.kind == "freshness":
@@ -295,6 +316,9 @@ def _to_rust(spec: _AssertionSpec):
         return assertion_not_null(spec.column)
     if spec.kind == "unique":
         return assertion_unique(spec.column)
+    if spec.kind == "unique_group":
+        assert spec.columns is not None
+        return assertion_unique_group(list(spec.columns))
     if spec.kind == "between":
         assert spec.low is not None and spec.high is not None
         return assertion_between(spec.column, spec.low, spec.high)

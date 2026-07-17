@@ -79,6 +79,16 @@ pub async fn evaluate(
     })
 }
 
+/// One field of a composite-uniqueness key, for a single row. An enum
+/// (rather than a stringified value) so Int64 and Utf8 key columns hash
+/// and compare without cross-type collisions (e.g. int 1 vs string "1").
+#[derive(Clone, PartialEq, Eq, Hash)]
+enum CompositeKeyPart {
+    I64(i64),
+    Str(String),
+    Null,
+}
+
 /// One per assertion. Each variant carries whatever state the
 /// assertion needs to accumulate across batches; `Error` is a
 /// terminal variant for setup failures (missing column, etc) so
@@ -99,6 +109,18 @@ enum Acc {
         column: String,
         col_idx: usize,
         seen: HashSet<String>,
+        dup_count: u64,
+    },
+    /// Composite (multi-column) uniqueness: the tuple of key columns
+    /// must not repeat. Mirrors the single-column `UniqueI64`/`UniqueStr`
+    /// but keys on a `Vec` of per-column parts so mixed Int64/Utf8 keys
+    /// hash correctly. NULL participates in the key (grouped, matching
+    /// the Postgres `GROUP BY` pushdown), so a repeated all-equal combo
+    /// — NULLs included — is a duplicate.
+    UniqueComposite {
+        columns: Vec<String>,
+        col_idxs: Vec<usize>,
+        seen: HashSet<Vec<CompositeKeyPart>>,
         dup_count: u64,
     },
     Between {
@@ -210,6 +232,43 @@ impl Acc {
                 },
                 Err(msg) => Acc::Error { message: msg },
             },
+            Assertion::UniqueGroup { columns } => {
+                if columns.is_empty() {
+                    Acc::Error {
+                        message: "unique-group requires at least one column".into(),
+                    }
+                } else {
+                    let mut col_idxs = Vec::with_capacity(columns.len());
+                    let mut err = None;
+                    for col in columns {
+                        match column_index(schema, col) {
+                            Ok(ci) => match schema.field(ci).data_type() {
+                                DataType::Int64 | DataType::Utf8 => col_idxs.push(ci),
+                                other => {
+                                    err = Some(format!(
+                                        "scan-path unique-group column {col:?}: unsupported \
+                                         Arrow type {other:?} (supported: Int64, Utf8)"
+                                    ));
+                                    break;
+                                }
+                            },
+                            Err(msg) => {
+                                err = Some(msg);
+                                break;
+                            }
+                        }
+                    }
+                    match err {
+                        Some(message) => Acc::Error { message },
+                        None => Acc::UniqueComposite {
+                            columns: columns.clone(),
+                            col_idxs,
+                            seen: HashSet::new(),
+                            dup_count: 0,
+                        },
+                    }
+                }
+            }
             Assertion::Between { column, low, high } => match column_index(schema, column) {
                 Ok(col_idx) => Acc::Between {
                     column: column.clone(),
@@ -511,6 +570,47 @@ impl Acc {
                     }
                 }
             }
+            Acc::UniqueComposite {
+                col_idxs,
+                seen,
+                dup_count,
+                ..
+            } => {
+                // Downcast each key column once per batch. Types were
+                // validated (Int64 / Utf8) at build time.
+                enum KeyCol<'a> {
+                    I64(&'a Int64Array),
+                    Str(&'a StringArray),
+                }
+                let cols: Vec<KeyCol> = col_idxs
+                    .iter()
+                    .map(|&ci| {
+                        let arr = batch.column(ci);
+                        match arr.data_type() {
+                            DataType::Int64 => KeyCol::I64(
+                                arr.as_any().downcast_ref::<Int64Array>().expect("Int64"),
+                            ),
+                            _ => KeyCol::Str(
+                                arr.as_any().downcast_ref::<StringArray>().expect("Utf8"),
+                            ),
+                        }
+                    })
+                    .collect();
+                for i in 0..batch.num_rows() {
+                    let key: Vec<CompositeKeyPart> = cols
+                        .iter()
+                        .map(|c| match c {
+                            KeyCol::I64(a) if a.is_null(i) => CompositeKeyPart::Null,
+                            KeyCol::I64(a) => CompositeKeyPart::I64(a.value(i)),
+                            KeyCol::Str(a) if a.is_null(i) => CompositeKeyPart::Null,
+                            KeyCol::Str(a) => CompositeKeyPart::Str(a.value(i).to_owned()),
+                        })
+                        .collect();
+                    if !seen.insert(key) {
+                        *dup_count += 1;
+                    }
+                }
+            }
             Acc::Between {
                 col_idx,
                 low,
@@ -671,6 +771,21 @@ impl Acc {
                         assertion_index,
                         format!(
                             "column {column:?} has {dup_count} value(s) appearing more than once"
+                        ),
+                    )
+                }
+            }
+            Acc::UniqueComposite {
+                columns, dup_count, ..
+            } => {
+                if dup_count == 0 {
+                    pass(assertion_index)
+                } else {
+                    fail(
+                        assertion_index,
+                        format!(
+                            "composite key ({}) has {dup_count} duplicated combination(s)",
+                            columns.join(", ")
                         ),
                     )
                 }

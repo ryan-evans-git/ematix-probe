@@ -78,6 +78,9 @@ impl DataAdapter for PostgresAdapter {
             let result = match assertion {
                 Assertion::NotNull { column } => self.run_not_null(plan, idx, column).await?,
                 Assertion::Unique { column } => self.run_unique(plan, idx, column).await?,
+                Assertion::UniqueGroup { columns } => {
+                    self.run_unique_group(plan, idx, columns).await?
+                }
                 Assertion::Between { column, low, high } => {
                     self.run_between(plan, idx, column, *low, *high).await?
                 }
@@ -226,6 +229,66 @@ impl PostgresAdapter {
                 verdict: Verdict::Fail,
                 message: Some(format!(
                     "column {column:?} has {dup_value_count} value(s) appearing more than once"
+                )),
+            })
+        }
+    }
+
+    /// Pushdown SQL for `UniqueGroup` — the composite-key analogue of
+    /// `run_unique`. Counts how many distinct value-combinations of the
+    /// key columns appear more than once:
+    ///   `SELECT count(*) FROM (SELECT c1, c2 FROM <t>
+    ///    GROUP BY c1, c2 HAVING count(*) > 1) d`
+    /// Pass when 0; Fail otherwise. `columns` is validated non-empty at
+    /// adapter time.
+    async fn run_unique_group(
+        &self,
+        plan: &ProbePlan,
+        idx: usize,
+        columns: &[String],
+    ) -> Result<AssertionResult, AdapterError> {
+        if columns.is_empty() {
+            return Ok(AssertionResult {
+                assertion_index: idx,
+                verdict: Verdict::Error,
+                message: Some("UniqueGroup requires at least one column".into()),
+            });
+        }
+        let table = qualified_table(plan.schema.as_deref(), &plan.table);
+        let cols = columns
+            .iter()
+            .map(|c| quote_ident(c))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let sql = format!(
+            "SELECT count(*) FROM \
+             (SELECT {cols} FROM {table} GROUP BY {cols} HAVING count(*) > 1) d"
+        );
+
+        let client = self
+            .pool
+            .get()
+            .await
+            .map_err(|e| AdapterError::Connection(format!("acquire failed: {e}")))?;
+        let row = client
+            .query_one(&sql, &[])
+            .await
+            .map_err(|e| AdapterError::Query(format!("unique-group query failed: {e}")))?;
+        let dup_count: i64 = row.get(0);
+
+        if dup_count == 0 {
+            Ok(AssertionResult {
+                assertion_index: idx,
+                verdict: Verdict::Pass,
+                message: None,
+            })
+        } else {
+            Ok(AssertionResult {
+                assertion_index: idx,
+                verdict: Verdict::Fail,
+                message: Some(format!(
+                    "composite key ({}) has {dup_count} duplicated combination(s)",
+                    columns.join(", ")
                 )),
             })
         }

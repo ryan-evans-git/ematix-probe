@@ -70,6 +70,46 @@ def test_auto_generates_unique_on_primary_key():
     assert "email.unique" not in names, names
 
 
+def test_composite_primary_key_emits_one_joint_unique():
+    # A multi-column PK is jointly unique — the shim must emit ONE
+    # composite unique_group, NOT a per-column unique for each PK
+    # column (which would hard-fail valid data).
+    class _OrderLine:
+        __tablename__ = "order_lines"
+        __schema__ = "public"
+        columns = (
+            _Col("order_id", nullable=False, primary_key=True),
+            _Col("line_no", nullable=False, primary_key=True),
+            _Col("qty", nullable=False),
+        )
+
+    p = probe_from_table(_OrderLine, source=source.postgres("postgres://localhost/x"))
+    names = p.assertion_names()
+    assert "unique_group(order_id, line_no)" in names, names
+    # No per-column uniques on the individual key columns.
+    assert "order_id.unique" not in names, names
+    assert "line_no.unique" not in names, names
+
+
+def test_unique_constraints_emit_composite_unique():
+    # Declared composite natural keys (__unique_constraints__) are
+    # checked too — previously they were silently never asserted.
+    class _User:
+        __tablename__ = "users"
+        __schema__ = "public"
+        __unique_constraints__ = (("tenant_id", "email"),)
+        columns = (
+            _Col("id", nullable=False, primary_key=True),
+            _Col("tenant_id", nullable=False),
+            _Col("email", nullable=False),
+        )
+
+    p = probe_from_table(_User, source=source.postgres("postgres://localhost/x"))
+    names = p.assertion_names()
+    assert "id.unique" in names, names  # single-col PK unchanged
+    assert "unique_group(tenant_id, email)" in names, names
+
+
 def test_schemaless_table_passes_schema_none():
     class _NoSchema:
         __tablename__ = "events"

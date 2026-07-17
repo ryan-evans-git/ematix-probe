@@ -51,6 +51,7 @@ impl PyAssertion {
         match &self.inner {
             core::Assertion::NotNull { .. } => "not_null",
             core::Assertion::Unique { .. } => "unique",
+            core::Assertion::UniqueGroup { .. } => "unique_group",
             core::Assertion::Between { .. } => "between",
             core::Assertion::Regex { .. } => "regex",
             core::Assertion::Enum { .. } => "enum",
@@ -317,6 +318,13 @@ fn assertion_unique(column: String) -> PyAssertion {
 }
 
 #[pyfunction]
+fn assertion_unique_group(columns: Vec<String>) -> PyAssertion {
+    PyAssertion {
+        inner: core::Assertion::UniqueGroup { columns },
+    }
+}
+
+#[pyfunction]
 fn assertion_between(column: String, low: f64, high: f64) -> PyAssertion {
     PyAssertion {
         inner: core::Assertion::Between { column, low, high },
@@ -364,6 +372,7 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyRunReport>()?;
     m.add_function(wrap_pyfunction!(assertion_not_null, m)?)?;
     m.add_function(wrap_pyfunction!(assertion_unique, m)?)?;
+    m.add_function(wrap_pyfunction!(assertion_unique_group, m)?)?;
     m.add_function(wrap_pyfunction!(assertion_between, m)?)?;
     m.add_function(wrap_pyfunction!(assertion_freshness, m)?)?;
     m.add_function(wrap_pyfunction!(assertion_regex, m)?)?;
